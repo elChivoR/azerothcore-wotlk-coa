@@ -1236,6 +1236,31 @@ public:
     SynchronizeProficiencies(player);
     RepairStarterKit(player, false);
     SendCharacterAdvancementAuthentication(player);
+
+    // SynchronizeProgression can grant a temporary taught ability (e.g. Eternal
+    // Curse 800157, AscensionTaughtAbilityData.h). Temporary spells are never
+    // saved to character_spell, so _LoadActions (which already ran during
+    // Player::LoadFromDB, before this hook) found the spell unknown and pruned
+    // its action bar slot for this login. Now that the grant above has landed,
+    // reload the saved bar the same way Player::ActivateSpec does after a spec
+    // switch, so a still-eligible taught ability does not appear to fall off
+    // the action bar on every relog.
+    CharacterDatabasePreparedStatement* actionsStmt =
+        CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHARACTER_ACTIONS_SPEC);
+    actionsStmt->SetData(0, player->GetGUID().GetRawValue());
+    actionsStmt->SetData(1, player->GetActiveSpec());
+
+    // That statement is prepared on asynchronous connections only, so a
+    // synchronous Query() asserts on a null MySQLPreparedStatement. The player
+    // can also leave before the response arrives, which is why the session -
+    // which owns this callback - resolves them instead of a captured pointer.
+    WorldSession* session = player->GetSession();
+    session->GetQueryProcessor().AddCallback(CharacterDatabase.AsyncQuery(actionsStmt)
+        .WithPreparedCallback([session](PreparedQueryResult result)
+        {
+            if (Player* owner = session->GetPlayer())
+                owner->LoadActions(result);
+        }));
   }
 
   void SendCharacterAdvancementAuthentication(Player *player) {
