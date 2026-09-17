@@ -1,4 +1,4 @@
-# Handoff: N-key spec-selection popup & Templar/Oathkeeper talent-tree visual desync
+# Handoff: N-key spec-selection popup & talent-tree visual desync
 
 Status report from an investigation session on 2026-09-17, testing `main` (`77e98c4f8`, includes PR #1498's
 client-DBC migration) against a locally-built repack. Written for whoever (human or agent) picks these two
@@ -9,11 +9,12 @@ bugs up next, so the same ground doesn't get re-covered.
 - **N-key popup bug**: confirmed, again, that it cannot be fixed from server-side C++ alone. Root cause and a
   working fix are known; the fix has to ship as a client-side Lua change in the next official CoA client patch
   (`patch-B.MPQ`), not as a PR to this repo. Exact snippet below.
-- **Templar/Oathkeeper visual desync bug** (tree looks unspent even though the server has the real data): found
-  and fixed two genuinely real bugs in the client's own compat addon, verified them in a Lua sandbox and live
-  in-game — but neither one is the cause of the visible symptom. That symptom's root cause is compiled into the
-  closed-source `Ascension.exe` client itself. This is a dead end for this repo and for any addon; it needs the
-  Ascension client team.
+- **Talent-tree visual desync bug** (tree looks unspent even though the server has the real data; not specific
+  to any one class -- reported across multiple characters, only tested against Templar/Oathkeeper this session):
+  found and fixed two genuinely real bugs in the client's own compat addon, verified them in a Lua sandbox and
+  live in-game — but neither one is the cause of the visible symptom. That symptom's root cause is compiled into
+  the closed-source `Ascension.exe` client itself. This is a dead end for this repo and for any addon; it needs
+  the Ascension client team.
 - PR #1498 (client-DBC migration) does **not** fix either bug by itself. Confirmed by testing a from-scratch
   local build with the real client DBC set installed.
 
@@ -72,13 +73,15 @@ if (entry.ClassId != player->getClass() ||
 
 No server-side PR is needed for this bug. It is 100% a client-patch change.
 
-## 2. Templar/Oathkeeper talent-tree visual desync
+## 2. Talent-tree visual desync
 
-**Symptom:** the talent tree shows as if nothing were spent (Oathkeeper shows only the anchor node; the class
-tree shows almost nothing), even though the abilities are learned and castable, and the server has the correct
-data (`character_spell`, `character_settings.core.ascension_active_spec` both correct; the server sends the
-right SMSG entry list on every login, confirmed via `ascension_compat_debug.log`). Not specific to one
-character or class 19 — reported on multiple toons.
+**Symptom:** the talent tree shows as if nothing were spent, even though the abilities are learned and
+castable, and the server has the correct data (`character_spell`, `character_settings.core.ascension_active_spec`
+both correct; the server sends the right SMSG entry list on every login, confirmed via
+`ascension_compat_debug.log`). Not specific to one class or character — reported across multiple toons; this
+session's reproduction used a Templar/Oathkeeper (class 19) character (Oathkeeper showed only the anchor node;
+the class tree showed almost nothing) simply because that's the character on hand, not because the bug is
+Templar-specific.
 
 ### Two real bugs found and fixed this session (client-side, in `CharacterAdvancementStateCompat.lua`)
 
