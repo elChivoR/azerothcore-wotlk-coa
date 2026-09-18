@@ -33,6 +33,7 @@
 #include "AscensionFreshCharacterCheck.h"
 #include "AscensionLiveBaselineData.h"
 #include "AscensionRacialAbilities.h"
+#include "AscensionPrimalistEarthquake.h"
 #include "AscensionPrimalistEarthshaping.h"
 #include "AscensionPrimalistSpiritBeast.h"
 #include "AscensionPrimalistWeapons.h"
@@ -5429,6 +5430,7 @@ public:
                     break;
             }
             ApplyAscensionClassMechanics(spellInfo);
+            ApplyAscensionPrimalistEarthquakeContract(spellInfo);
             ApplyAscensionPrimalistEarthshapingContracts(spellInfo);
             ApplyAscensionPrimalistSpiritBeastContract(spellInfo);
             ApplyAscensionPrimalistWeaponsContract(spellInfo);
