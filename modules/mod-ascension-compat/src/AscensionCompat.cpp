@@ -707,7 +707,7 @@ public:
             [spellId](auto const& entry) { return entry.ParentSpellId == spellId; });
     }
 
-    uint32 SynchronizeTaughtAbilities(Player* player)
+    uint32 SynchronizeTaughtAbilities(Player* player, bool beforeMap = false)
     {
         if (!IsAscensionCustomClass(player))
             return 0;
@@ -740,10 +740,13 @@ public:
             if (player->HasSpell(entry.SpellId))
                 ++learned;
         }
-        if (player->getClass() == CLASS_SON_OF_ARUGAL)
+        if (!beforeMap && player->getClass() == CLASS_SON_OF_ARUGAL)
         {
             // Native spec changes reconcile this flag, but removing a temporary
             // spell during a CAD refund does not. Preserve independently owned 674.
+            // The before-map pass leaves this to the OnPlayerLogin one: the saved
+            // inventory has already been validated by then, and unequipping an
+            // offhand before the player is in the world is a separate contract.
             bool const dualWield = player->HasSpell(674);
             if (player->CanDualWield() != dualWield)
             {
@@ -1237,14 +1240,14 @@ public:
     RepairStarterKit(player, false);
     SendCharacterAdvancementAuthentication(player);
 
-    // SynchronizeProgression can grant a temporary taught ability (e.g. Eternal
-    // Curse 800157, AscensionTaughtAbilityData.h). Temporary spells are never
-    // saved to character_spell, so _LoadActions (which already ran during
-    // Player::LoadFromDB, before this hook) found the spell unknown and pruned
-    // its action bar slot for this login. Now that the grant above has landed,
-    // reload the saved bar the same way Player::ActivateSpec does after a spec
-    // switch, so a still-eligible taught ability does not appear to fall off
-    // the action bar on every relog.
+    // Taught abilities (e.g. Eternal Curse 800157, AscensionTaughtAbilityData.h)
+    // are temporary spells and are never saved to character_spell, so
+    // Player::_LoadActions - which runs inside Player::LoadFromDB, before both
+    // PrepareTaughtAbilitiesBeforeMap and this hook - found them unknown and
+    // pruned their action bar slots for this login. Now that the grant has
+    // landed, reload the saved bar the same way Player::ActivateSpec does after
+    // a spec switch, so a still-eligible taught ability does not appear to fall
+    // off the action bar on every relog.
     CharacterDatabasePreparedStatement* actionsStmt =
         CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHARACTER_ACTIONS_SPEC);
     actionsStmt->SetData(0, player->GetGUID().GetRawValue());
@@ -1261,6 +1264,40 @@ public:
             if (Player* owner = session->GetPlayer())
                 owner->LoadActions(result);
         }));
+  }
+
+  /// Grant the taught abilities before the client's spell list goes out, the same
+  /// place and for the same reason the collection service prepares owned companions.
+  ///
+  /// They are granted as temporary spells, so they are never saved and have to be
+  /// granted again on every login. Doing that from OnPlayerLogin means the player is
+  /// already in the world, where Player::_addSpell announces the grant, and the client
+  /// reports learning them again on each relog although nothing changed. Outside the
+  /// world no such packet is sent and the replaced snapshot carries them instead.
+  ///
+  /// The OnPlayerLogin pass stays as it is: it skips whatever is already owned, and it
+  /// still covers a parent that is only granted once that later pass has run.
+  void PrepareTaughtAbilitiesBeforeMap(Player* player)
+  {
+    // This hook also runs on ordinary map changes, where the spellbook is already live.
+    if (!IsAscensionCustomClass(player) || player->IsInWorld() ||
+        !player->GetSession()->PlayerLoading())
+      return;
+
+    uint32 const specializationId = player->GetPlayerSetting(ASCENSION_ACTIVE_SPEC_SETTING, 0).value;
+    if (specializationId)
+    {
+        std::lock_guard<std::mutex> lock(_stateLock);
+        _activeSpecializations[player->GetGUID().GetCounter()] = specializationId;
+    }
+
+    if (uint32 const learned = SynchronizeTaughtAbilities(player, true))
+    {
+        player->SendInitialSpells();
+        LOG_INFO("module.ascension_compat",
+                 "Prepared {} taught abilities for {} before entering the world",
+                 learned, player->GetName());
+    }
   }
 
   void SendCharacterAdvancementAuthentication(Player *player) {
@@ -4916,6 +4953,7 @@ public:
         {
             AscensionCollectionService::Instance().PrepareOwnedCompanionsBeforeMap(player);
             AscensionCollectionService::Instance().PrepareOwnedBankSpellsBeforeMap(player);
+            AscensionClassService::Instance().PrepareTaughtAbilitiesBeforeMap(player);
         }
     }
 
