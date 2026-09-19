@@ -228,11 +228,12 @@ a previously named snapshot of the same metric; it is available on snapshots and
 `cast` accepts an optional `destination` with `x`, `y`, `z` to send an explicit ground target.
 
 Metrics: `health`, `max_health`, `power`, `max_power`, `alive`, `combat`, `casting`, `level`, `quest_objective_count` (needs `quest`, optional `index`), `knows_spell`,
-`has_talent`, `talent_points`, `cooldown_ms`, `item_count`, `bank_bag_slots`, `aura`, `aura_stacks`, `aura_charges`,
+`has_talent`, `talent_points`, `cooldown_ms`, `item_count`, `carried_item_count`, `bank_bag_slots`, `aura`, `aura_stacks`, `aura_charges`,
 `aura_duration_ms`, `aura_amount`, `pet_entry`, `pet_aura_stacks`, `owned_creature_count`,
 `charm_entry`, `charm_aura_stacks`, `controls_self`, `private_instance`, `dynamic_object`,
 `dynamic_object_duration_ms`.
 Boolean metrics use 0/1. Spell/aura metrics require `spell`; `item_count` requires `item`.
+`carried_item_count` sums the stack counts of equipped items (bags included), the backpack and the bags' contents.
 `aura_positive` reads the applied aura's beneficial flag; check `aura` separately to distinguish absence from a debuff.
 `gossip_options` counts the player's current server-side gossip options; it does not verify client rendering.
 `who_count` counts players in the actor's last native Who response; `who_class` requires a player `target`
@@ -267,7 +268,8 @@ periodic aura effect's snapshotted crit chance; `aura_script_value` requires `ke
 `script_spell_damage_taken` and `script_periodic_damage_taken` require `target` as the attacker (and `spell` for
 the latter two) and return 1000 after the registered module damage-taken hooks. `set_health` also accepts a
 creature actor.
-`open_item` takes `actor` and `item` and submits the native container-open packet. `close_loot` takes `actor`
+`open_item` takes `actor` and `item` and submits the native container-open packet, offering it to the
+packet hooks first as `WorldSession::Update` does. `close_loot` takes `actor`
 and closes its current loot window. `collect_loot` takes `actor`, collects slot zero, verifies that its full rolled
 quantity reached inventory and records the item/count. It supports ordinary container loot, not quest-only slots.
 `loot_count` and `loot_entry` report the actor's current uncollected item slots and first entry; `loot_received`
