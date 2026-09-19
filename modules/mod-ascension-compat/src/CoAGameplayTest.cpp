@@ -730,6 +730,8 @@ private:
             return player->GetFreeTalentPoints();
         if (metric == "bank_bag_slots")
             return player->GetBankBagSlotCount();
+        if (metric == "taxi_node")
+            return player->m_taxi.IsTaximaskNodeKnown(step.get<uint32>("entry"));
         if (metric == "private_instance")
             return player->GetMap()->IsScriptedPrivateInstance();
         if (metric == "controls_self")
