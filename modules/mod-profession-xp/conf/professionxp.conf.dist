@@ -1,0 +1,68 @@
+[worldserver]
+
+################################################################################################################
+#    Profession.XP
+#        Description: character experience for gathering and crafting, as the original CoA
+#                     granted it. Restores issues #368, #1410, #1966 and #4266.
+#
+#                     The award is what a mob of your own level gives, scaled by the colour of
+#                     the node or recipe against your skill: orange, yellow, green, and grey
+#                     which always gives nothing.
+#
+#                     Every value below is read at startup and on ".reload config".
+#
+#        Profession.XP.Enable: 1 (Default) - award the experience
+#                              0 - the module stays loaded but grants nothing
+#
+#        Profession.XP.Preset: how much an orange node or recipe pays, as a fraction of what a
+#                              mob of your own level awards. No canonical formula survived, so
+#                              these are the tiers that went to a realm vote.
+#                              flavour  = 0.15 - a small bonus, levelling unchanged
+#                              balanced = 0.50 (Default) - viable but slower than playing
+#                              realpath = 1.00 - one node equals one mob kill
+#                              custom   = use the three values under Profession.XP.Custom
+#
+#                              balanced is the default because two of the three player reports
+#                              that name an amount describe roughly half a kill (#1966, #368);
+#                              #1410 is the one that remembers a full kill, which is realpath.
+#
+#                              Yellow pays 60% of orange and green 30%, unless custom breaks it.
+#
+#        Profession.XP.Custom.*: the multipliers used when Preset = custom. Grey always pays
+#                                nothing and cannot be configured.
+#
+#        Profession.XP.CraftingFactor: crafting award relative to gathering.
+#                                      1.0 (Default) - the same
+#                                      2.0 - crafting pays double, which pairs balanced
+#                                            gathering with the full kill #1410 remembers
+#                                      0.0 - no experience from crafting
+#
+#                                      Crafting is instant when you hold the materials, while
+#                                      gathering costs travel time, so lowering this is the
+#                                      usual answer if crafting turns out to level too fast.
+#
+#        Profession.XP.FollowPlayerRate: 1 (Default) - this experience follows the rate a player
+#                                                     picked with ".xp", like every other source
+#                                        0 - always granted at the realm's base rate
+#
+#        Profession.XP.Skill.*: per-profession switches. Prospecting covers milling too, since
+#                               both reach the same code path. Lockpicking is off by default
+#                               because a lock can be picked repeatedly at no cost.
+#
+################################################################################################################
+
+Profession.XP.Enable = 1
+Profession.XP.Preset = balanced
+Profession.XP.CraftingFactor = 1.0
+Profession.XP.FollowPlayerRate = 1
+
+Profession.XP.Custom.Orange = 0.50
+Profession.XP.Custom.Yellow = 0.30
+Profession.XP.Custom.Green = 0.15
+
+Profession.XP.Skill.Mining = 1
+Profession.XP.Skill.Herbalism = 1
+Profession.XP.Skill.Skinning = 1
+Profession.XP.Skill.Prospecting = 1
+Profession.XP.Skill.Lockpicking = 0
+Profession.XP.Skill.Crafting = 1
