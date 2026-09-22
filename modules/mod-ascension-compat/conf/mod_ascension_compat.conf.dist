@@ -71,11 +71,25 @@ AscensionCompat.RulesetLoginDefault = 1
 # Local solo scaling. A creature below the player-minus-three floor is raised
 # with stock AzerothCore stat curves. Creatures one or two levels below, equal,
 # or higher stay unchanged. Friendly NPCs, pets, critters and triggers are not mobs.
+#
+# A module that gives each character their own version of a creature owns this
+# answer while it is enabled, and this path stands aside for as long as it is:
+# raising the object is a change every client is told about, so it cannot be one
+# character's alone. Nothing needs to change here either way, the takeover is
+# logged at config load, and switching that module off hands this path back
+# exactly as it was.
 AscensionCompat.LevelScaling = 1
 
 # Lower-level quests report the player's level and use the matching QuestXP row.
 # Quests already above the player remain higher. Shared quest templates are immutable.
 AscensionCompat.QuestLevelScaling = 1
+
+# Automatic progression: hand out the class abilities and rank upgrades for the
+# character's class and level as they level up. Set to 0 to stop that
+# and let the player ask instead - a Book of Ascension grants them, so a realm that
+# wants the books to be the way abilities are earned runs with this off. A talent
+# tree's free nodes are granted either way: the books do not sell them. Reloadable.
+AscensionCompat.AutoProgression = 0
 
 # Extension range derived from the installed client's opcode dispatch table.
 # Keep these values decimal because ConfigMgr numeric values are parsed as decimal.
@@ -86,3 +100,89 @@ AscensionCompat.LastExtensionOpcode = 2515
 # Startup-only: solo levels 10-59, three scenes, depths 1-15. Realm level cap is unchanged.
 # Enable only with the reviewed installation package; native gameplay acceptance is still required.
 Ascension.Manastorm.Enable = 0
+
+# What kind of realm the client is told it is on: live, seasonal, league, ptr
+# or development. Exactly one is sent.
+#
+# This is not cosmetic. The client builds its vanity catalogue only from rows
+# that match an active realm type, so with none set the Vanity Collection stays
+# empty no matter what the account owns.
+# Default: live
+AscensionCompat.RealmType = "live"
+
+#
+#    AscensionCompat.LevelScalingMaxLift
+#        Description: How many levels above its own a creature may be lifted by
+#                     LevelScaling. Without a cap, a level 30 player crossing a
+#                     starting zone lifts every creature around to 27, and the
+#                     low level bots fighting them are killed by creatures that
+#                     were never theirs.
+#                     A creature has a single level, broadcast to every client:
+#                     it cannot be 27 for a player and 2 for a bot. Bounding the
+#                     lift is the only compromise between keeping content
+#                     relevant and keeping the world playable for whoever is
+#                     already in it.
+#                     0 disables the cap and restores the original behaviour.
+#        Default:     5
+
+AscensionCompat.LevelScalingMaxLift = 5
+
+###################################################################################################
+# HIGH-RISK PACKAGE
+#
+#    HighRisk.Losses
+#        Description: Deaths in the open world while under the High-Risk ruleset (aura 1004019) move
+#                     tradeable equipment, bag resources and gold into a persistent chest that any
+#                     living High-Risk player nearby can recover. Kill XP is unchanged: the ruleset
+#                     aura already carries the native bonus.
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+HighRisk.Losses = 0
+
+#    HighRisk.GearChance
+#    HighRisk.ResourceChance
+#    HighRisk.GoldChance
+#        Description: Percent chance, per eligible death, that each category is lost. Realm tuning,
+#                     not verified Ascension rates. If every roll misses, one available category is
+#                     still chosen so an eligible death never silently produces no chest.
+#        Default:     50
+
+HighRisk.GearChance = 50
+HighRisk.ResourceChance = 50
+HighRisk.GoldChance = 50
+
+#    PvpPower.Enable
+#        Description: Item spells named "PvP Power (+N)" scale damage and healing at level 60, capped at
+#                     495 points. Damage +0.05% per point against players (and against uncontrolled
+#                     creatures for a High-Risk attacker in the open world); creature damage received
+#                     there -0.05% per point; healing and shields +0.02% per point in War Mode,
+#                     High-Risk open world and battlegrounds.
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+PvpPower.Enable = 0
+
+#    Bloodforged.Enable
+#        Description: Adds one independent Bloodforged roll to eligible open-world creature corpses
+#                     for High-Risk players from level 15, drawn from the reviewed catalogue in
+#                     coa_bloodforged_catalogue. Requires PvpPower.Enable.
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+Bloodforged.Enable = 0
+
+#    Bloodforged.Rates15
+#    Bloodforged.Rates25
+#    Bloodforged.Rates35
+#    Bloodforged.Rates45
+#    Bloodforged.Rates55
+#        Description: Percent per eligible corpse for the level band starting at that level, as three
+#                     values: uncommon, rare, epic. Independent rolls, one quality per roll.
+#        Default:     "4.50 0.50 0.00", "4.00 1.00 0.00", "3.80 1.40 0.15", "3.60 1.80 0.25", "3.40 2.20 0.40"
+
+Bloodforged.Rates15 = "4.50 0.50 0.00"
+Bloodforged.Rates25 = "4.00 1.00 0.00"
+Bloodforged.Rates35 = "3.80 1.40 0.15"
+Bloodforged.Rates45 = "3.60 1.80 0.25"
+Bloodforged.Rates55 = "3.40 2.20 0.40"

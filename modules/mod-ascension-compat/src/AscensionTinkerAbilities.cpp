@@ -47,8 +47,6 @@ void Finish(Player* player, Spell* spell)
     for (uint32 id : TinkerFinite)
         if (uint64 generation = spell->GetScriptValue(id))
         {
-            // The children calculate their damage during the channel. Keep the
-            // selected modifiers until its owner-side aura ends, then spend once.
             if (spell->GetSpellInfo()->Id == 500213)
                 if (Aura* channel = player->GetAura(500213,player->GetGUID()))
                 {
@@ -135,12 +133,9 @@ public:
         bool bomb = Named(info,801005);
         if (player->HasAura(92141) && (shot || sticky))
             Resource(player,Scrap,shot ? 3 : 10);
-        if ((shot || id == 500213) && target)
-        {
-            State(player).focus = target->GetGUID();
+        if (NotifySpellAttack(player,info,target))
             for (Creature* device : Devices(player))
                 device->AI()->SetGUID(target->GetGUID(),1);
-        }
         if (shot)
         {
             if (player->HasAura(707249))
@@ -238,8 +233,7 @@ public:
         auto* info = spell->GetSpellInfo();
         if (!player || !target || info->SpellFamilyName != 34 || miss != SPELL_MISS_NONE)
             return;
-        // Repair player targets carrying the old permanent beacon marker; owned devices keep their guard.
-        if (healing && target->IsPlayer() && Any(info, {801707, 529288}))
+        if (target->IsPlayer())
             target->RemoveAurasDueToSpell(560711);
         if (damage && Named(info,801005) && player->HasAura(805314))
             if (Aura* tracer = target->GetAura(653247,player->GetGUID()); tracer && tracer->GetStackAmount() >= 10)

@@ -226,6 +226,14 @@ enum PlayerHook
     PLAYERHOOK_ON_NORMALIZE_ACTION_BUTTON_SPELL,
     PLAYERHOOK_ON_SPELL_CHARGE_CONSUMED,
     PLAYERHOOK_ON_SPELL_COOLDOWN_CALCULATED,
+    PLAYERHOOK_CAN_ENTER_MANASTORM,
+    PLAYERHOOK_ON_PLAYER_ENVIRONMENTAL_DAMAGE,
+    PLAYERHOOK_ON_PLAYER_BREATH_INVERTED,
+    PLAYERHOOK_ON_CAN_REGENERATE,
+    PLAYERHOOK_ON_CAN_ENERGIZE,
+    PLAYERHOOK_ON_GET_MAX_ALLOWED_LEVEL,
+    PLAYERHOOK_ON_BANKER_ACTIVATE,
+    PLAYERHOOK_ON_BANK_WITHDRAW,
     PLAYERHOOK_END
 };
 
@@ -299,6 +307,13 @@ public:
 
     // Called when a player gains XP (before anything is given)
     virtual void OnPlayerGiveXP(Player* /*player*/, uint32& /*amount*/, Unit* /*victim*/, uint8 /*xpSource*/) { }
+
+    // Level-up cap for Player::GiveXP. 0 = no restriction; a script returns the
+    // highest level the player may reach right now (e.g. gate-1 for
+    // NO_LEVEL_PAST_REQUIREMENTS). Unlike OnPlayerGiveXP this is enforced after
+    // every multiplier (rate, RaF, rested, favored, other hook order), so it
+    // cannot be bypassed by a large XP gain.
+    virtual uint8 OnPlayerGetMaxAllowedLevel(Player* /*player*/) { return 0; }
 
     // Called when a player's reputation changes (before it is actually changed)
     virtual bool OnPlayerReputationChange(Player* /*player*/, uint32 /*factionID*/, int32& /*standing*/, bool /*incremental*/) { return true; }
@@ -475,6 +490,12 @@ public:
 
     // Before durability repair action, you can even modify the discount value
     virtual void OnPlayerBeforeDurabilityRepair(Player* /*player*/, ObjectGuid /*npcGUID*/, ObjectGuid /*itemGUID*/, float&/*discountMod*/, uint8 /*guildBank*/) { }
+
+    // Before a banker click is resolved. Returning false withholds the native bank window, for a
+    // banker the script answers itself. The click is answered before the core's own interaction
+    // checks - which is why the script is given the clicked GUID rather than a resolved creature,
+    // and why it does its own reach check before it speaks.
+    [[nodiscard]] virtual bool OnPlayerBankerActivate(Player* /*player*/, ObjectGuid /*banker*/) { return true; }
 
     //Before buying something from any vendor
     virtual void OnPlayerBeforeBuyItemFromVendor(Player* /*player*/, ObjectGuid /*vendorguid*/, uint32 /*vendorslot*/, uint32& /*item*/, uint8 /*count*/, uint8 /*bag*/, uint8 /*slot*/) { };
@@ -827,6 +848,40 @@ public:
     virtual bool OnPlayerCanResurrect(Player* /*player*/) { return true; }
 
     /**
+     * @brief This hook is called before a player (or party member) enters the Manastorm.
+     *
+     * @param player Contains information about the Player
+     *
+     * @return true if player is allowed to enter the Manastorm
+     */
+    virtual bool OnPlayerCanEnterManastorm(Player* /*player*/) { return true; }
+
+    // Called when a player withdraws from a bank the Ascension personal/realm bank items
+    // open (an item moved out, or money taken out). `kind`: 0 = personal, 1 = realm.
+    virtual void OnPlayerBankWithdraw(Player* /*player*/, uint8 /*kind*/) { }
+
+    /**
+     * @brief This hook is called when a player is about to take environmental damage.
+     *
+     * @param player Contains information about the Player
+     * @param type The EnviromentalDamage type (DAMAGE_EXHAUSTED, DAMAGE_DROWNING, ...)
+     * @param damage The damage that will be applied
+     *
+     * @return true if the environmental damage should be applied
+     */
+    virtual bool OnPlayerEnvironmentalDamage(Player* /*player*/, uint32 /*type*/, uint32 /*damage*/) { return true; }
+
+    /**
+     * @brief Called by Player::HandleDrowning. Return true to invert breathing:
+     * the player drowns on land and recovers breath underwater.
+     *
+     * @param player Contains information about the Player
+     *
+     * @return true if the breathing mechanic should be inverted
+     */
+    virtual bool OnPlayerBreathInverted(Player* /*player*/) { return false; }
+
+    /**
      * @brief This hook is called, to cancel the normal level up flow
      *
      * @param player Contains information about the Player
@@ -835,6 +890,26 @@ public:
      * @return true if player is allowed to gain the new level
      */
     virtual bool OnPlayerCanGiveLevel(Player* /*player*/, uint8 /*newLevel*/) { return true; }
+
+    /**
+     * @brief Called before a natural regeneration tick is applied (health/power).
+     *
+     * @param player Contains information about the Player
+     * @param power The power being regenerated (Powers; POWER_HEALTH for health)
+     *
+     * @return true if the regeneration tick is allowed
+     */
+    [[nodiscard]] virtual bool OnPlayerCanRegenerate(Player* /*player*/, int32 /*power*/) { return true; }
+
+    /**
+     * @brief Called before a spell/item energize effect restores a power.
+     *
+     * @param player Contains information about the Player
+     * @param power The power being energized (Powers)
+     *
+     * @return true if the energize effect is allowed
+     */
+    [[nodiscard]] virtual bool OnPlayerCanEnergize(Player* /*player*/, int32 /*power*/) { return true; }
 
     /**
      * @brief This hook is called whenever a player interacts with a vendor, and is then shown the vendor list

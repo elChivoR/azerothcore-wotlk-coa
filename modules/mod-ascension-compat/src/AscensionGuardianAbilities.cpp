@@ -24,7 +24,7 @@ public:
     GuardianLanding(Player* owner, Position const& destination) : _owner(owner->GetGUID()),
         _map(owner->GetMapId()), _instance(owner->GetInstanceId()), _destination(destination) { }
 
-    bool Execute(uint64 time, uint32 /*diff*/) override
+    bool Execute(uint64 time, uint32) override
     {
         Player* player = ObjectAccessor::FindPlayer(_owner);
         if (!player || !player->IsAlive() || !player->IsInWorld() || player->GetMapId() != _map ||
@@ -194,14 +194,14 @@ class aura_ascension_guardian_advance : public AuraScript
 {
     PrepareAuraScript(aura_ascension_guardian_advance);
 
-    void Apply(AuraEffect const* /*effect*/, AuraEffectHandleModes /*mode*/)
+    void Apply(AuraEffect const*, AuraEffectHandleModes)
     {
         GetTarget()->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, MECHANIC_ROOT, true);
         GetTarget()->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, MECHANIC_SNARE, true);
         GetTarget()->RemoveAurasWithMechanic((1 << MECHANIC_ROOT) | (1 << MECHANIC_SNARE), AURA_REMOVE_BY_DEFAULT);
     }
 
-    void Removed(AuraEffect const* effect, AuraEffectHandleModes /*mode*/)
+    void Removed(AuraEffect const* effect, AuraEffectHandleModes)
     {
         Unit* owner = GetTarget();
         owner->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, MECHANIC_ROOT, false);
@@ -219,10 +219,54 @@ class aura_ascension_guardian_advance : public AuraScript
             EFFECT_1, SPELL_AURA_FORCE_MOVE_FORWARD, AURA_EFFECT_HANDLE_REAL);
     }
 };
+
+class aura_ascension_guardian_hold_the_line : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_guardian_hold_the_line);
+
+    void SetExtraImmunities(bool apply)
+    {
+        Unit* target = GetTarget();
+        target->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, MECHANIC_KNOCKOUT, apply);
+        target->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, MECHANIC_SAPPED, apply);
+        target->ApplySpellImmune(GetId(), IMMUNITY_EFFECT, SPELL_EFFECT_KNOCK_BACK_DEST, apply);
+    }
+
+    void Apply(AuraEffect const*, AuraEffectHandleModes)
+    {
+        SetExtraImmunities(true);
+        if (GetSpellInfo()->HasAttribute(SPELL_ATTR1_IMMUNITY_PURGES_EFFECT))
+            GetTarget()->RemoveAurasWithMechanic((1ULL << MECHANIC_KNOCKOUT) | (1ULL << MECHANIC_SAPPED),
+                AURA_REMOVE_BY_DEFAULT, GetId());
+    }
+
+    void Remove(AuraEffect const*, AuraEffectHandleModes)
+    {
+        Unit* target = GetTarget();
+        auto const& effects = target->GetAuraEffectsByType(SPELL_AURA_EFFECT_IMMUNITY);
+        bool protectedByAnother = std::any_of(effects.begin(), effects.end(), [this, target](AuraEffect const* other)
+        {
+            if (other->GetId() != GetId() || other->GetBase() == GetAura())
+                return false;
+            AuraApplication const* application = other->GetBase()->GetApplicationOfTarget(target->GetGUID());
+            return application && application->IsActive(other->GetEffIndex());
+        });
+        SetExtraImmunities(protectedByAnother);
+    }
+
+    void Register() override
+    {
+        AfterEffectApply += AuraEffectApplyFn(aura_ascension_guardian_hold_the_line::Apply,
+            EFFECT_1, SPELL_AURA_EFFECT_IMMUNITY, AURA_EFFECT_HANDLE_REAL);
+        AfterEffectRemove += AuraEffectRemoveFn(aura_ascension_guardian_hold_the_line::Remove,
+            EFFECT_1, SPELL_AURA_EFFECT_IMMUNITY, AURA_EFFECT_HANDLE_REAL);
+    }
+};
 }
 
 void AddAscensionGuardianAbilityScripts()
 {
     RegisterSpellScript(spell_ascension_guardian_ability);
     RegisterSpellScript(aura_ascension_guardian_advance);
+    RegisterSpellScript(aura_ascension_guardian_hold_the_line);
 }

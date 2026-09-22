@@ -65,15 +65,9 @@ class aura_ascension_venomancer_lifecycle : public AuraScript
         if (id == Skulk)
         {
             Cast(player,player,800906);
-            // Native DBC data gates several Skulk-only abilities behind CasterAuraSpell = 520890
-            // ("Skulking"), a permanent marker aura nothing else ever grants. Without this, the
-            // game client itself blocks the cast before it reaches the server.
             Cast(player,player,520890);
         }
         if (id == Spider || id == Beetle)
-            // Hive Instinct (804968) is gated behind CasterAuraSpell = 803184 ("Beetle or Spider
-            // Form"), a synthetic marker aura nothing else ever grants. Without this, the game
-            // client itself blocks the cast before it reaches the server.
             Cast(player,player,803184);
         if (id == 806154)
         {
@@ -311,13 +305,17 @@ class aura_ascension_venomancer_lifecycle : public AuraScript
         if (Named(GetSpellInfo(),800902) && slot == 1)
         {
             PreventDefaultAction();
-            if (!GetAura()->GetScriptValue(803529))
+            constexpr uint32 BookOfShadra = 705957;
+            constexpr uint32 GreenSalveSeekHeal = 803529;
+            bool seekEveryTick = player->HasAura(BookOfShadra);
+            if (seekEveryTick || !GetAura()->GetScriptValue(GreenSalveSeekHeal))
             {
-                GetAura()->SetScriptValue(803529,1);
-                auto allies = Allies(player,target,Radius(803529));
+                GetAura()->SetScriptValue(GreenSalveSeekHeal,1);
+                auto allies = Allies(player,target,Radius(GreenSalveSeekHeal));
                 allies.remove(target);
                 if (!allies.empty())
-                    player->CastCustomSpell(803529,SPELLVALUE_BASE_POINT0,effect->GetAmount(),allies.front(),true);
+                    player->CastCustomSpell(GreenSalveSeekHeal,SPELLVALUE_BASE_POINT0,
+                        effect->GetAmount(),allies.front(),true);
             }
         }
         if (Named(GetSpellInfo(),706962) && slot == 1)

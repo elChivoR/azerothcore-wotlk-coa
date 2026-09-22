@@ -1011,7 +1011,9 @@ enum PlayerXPSource
     XPSOURCE_QUEST = 1,
     XPSOURCE_QUEST_DF = 2,
     XPSOURCE_EXPLORE = 3,
-    XPSOURCE_BATTLEGROUND = 4
+    XPSOURCE_BATTLEGROUND = 4,
+    XPSOURCE_PROFESSION = 5,
+    XPSOURCE_PROFESSION_SKILL = 6
 };
 
 enum InstantFlightGossipAction
@@ -1450,6 +1452,13 @@ public:
     /*********************************************************/
 
     int32 GetQuestLevel(Quest const* quest) const;
+
+    /// Re-sends the query data for every quest in the log. The client caches a quest's data by
+    /// quest id, across characters and sessions, so its copy of the level and of the rewards stands
+    /// until it is told again - which is what makes a quest picked up under one open-world scaling
+    /// choice keep showing that choice's numbers after the character changes it. Called when the
+    /// choice changes and when the effective level moves (login, level-up).
+    void RefreshQuestLogQueries();
 
     void PrepareQuestMenu(ObjectGuid guid);
     void SendPreparedQuest(ObjectGuid guid);
@@ -1974,6 +1983,8 @@ public:
     bool UpdateSkill(uint32 skill_id, uint32 step);
     bool UpdateSkillPro(uint16 SkillId, int32 Chance, uint32 step);
 
+    void RewardProfessionXP(uint32 skillId, uint32 current, uint32 gray, uint32 green, uint32 yellow,
+        bool disenchanting = false);
     bool UpdateCraftSkill(uint32 spellid);
     bool UpdateGatherSkill(uint32 SkillId, uint32 SkillValue, uint32 RedLevel, uint32 Multiplicator = 1);
     bool UpdateFishingSkill();

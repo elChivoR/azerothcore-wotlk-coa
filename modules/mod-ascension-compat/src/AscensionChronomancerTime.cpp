@@ -1,5 +1,6 @@
 /* Copyright (C) 2016+ AzerothCore, GNU AGPL v3. */
 #include "CellImpl.h"
+#include "DBCStores.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
 #include "Player.h"
@@ -17,6 +18,9 @@ namespace
 enum TimeSpells : uint32
 {
     Epoch = 801270,
+    CorrectTheMistake = 572352,
+    Overcorrection = 707657,
+    OvercorrectionHeal = 561231,
     Recovery = 800857,
     RenewalAeon = 806290,
     ResilienceAeon = 806291,
@@ -45,7 +49,11 @@ enum TimeSpells : uint32
     Decelerate = 572632,
     TimeOut = 802229,
     TimeOutRankTwo = 803896,
-    TimeOutRankThree = 803897
+    TimeOutRankThree = 803897,
+    TimeOutStasis = 802228,
+    ExpeditingTime = 706055,
+    BorrowedTime = 680373,
+    BorrowedTimeHeal = 680374
 };
 
 Player* Chronomancer(Unit* caster)
@@ -71,7 +79,7 @@ std::list<Unit*> Nearby(Player* player, Unit* center, uint32 helper, bool friend
     SpellInfo const* info = sSpellMgr->GetSpellInfo(helper);
     if (!info || !center || !center->IsInWorld())
         return targets;
-    float radius = info->Effects[EFFECT_0].CalcRadius(player);
+    float radius = helper == Oblivion ? 15.0f : info->Effects[EFFECT_0].CalcRadius(player);
     Acore::AnyUnitInObjectRangeCheck check(center, radius);
     Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> search(center, targets, check);
     Cell::VisitObjects(center, search, radius);
@@ -130,10 +138,11 @@ void ExtendRecovery(Player* player, Unit* target)
     }
 }
 
-void ApplyEpochAeon(Player* player, Unit* target, uint32 healing)
+void ApplyEpochAeon(Player* player, Unit* target, uint32 healing, uint32 healingIncludingOverheal)
 {
     if (player->HasAura(ResilienceAeon))
         SpreadRecovery(player, target, ResilienceSpread);
+    healing = healingIncludingOverheal;
     if (!healing)
         return;
     if (player->HasAura(RenewalAeon))
@@ -148,8 +157,14 @@ void ApplyEpochAeon(Player* player, Unit* target, uint32 healing)
         player->CastCustomSpell(Renewal, SPELLVALUE_BASE_POINT0, tick, target, true);
     }
     else if (player->HasAura(ProtectionAeon))
+    {
+        uint64 absorb = uint64(healing) * std::max(0, Amount(ProtectionAeon)) / 100;
+        if (Aura* existing = target->GetAura(Protection, player->GetGUID()))
+            if (AuraEffect const* effect = existing->GetEffect(EFFECT_0))
+                absorb += std::max(0, effect->GetAmount());
         player->CastCustomSpell(Protection, SPELLVALUE_BASE_POINT0,
-            int32(std::min<uint64>(uint64(healing) * Amount(ProtectionAeon) / 100, INT32_MAX)), target, true);
+            int32(std::min<uint64>(absorb, INT32_MAX)), target, true);
+    }
     else if (player->HasAura(OblivionAeon))
     {
         auto enemies = Nearby(player, target, Oblivion, false);
@@ -157,6 +172,22 @@ void ApplyEpochAeon(Player* player, Unit* target, uint32 healing)
             player->CastCustomSpell(Oblivion, SPELLVALUE_BASE_POINT0,
                 int32(std::min<uint32>(healing, INT32_MAX)), enemies.front(), true);
     }
+}
+
+void ApplyOvercorrection(Player* player, Unit* target, uint32 healing, uint32 healingIncludingOverheal)
+{
+    if (!player->HasAura(Overcorrection) || healingIncludingOverheal <= healing)
+        return;
+    SpellInfo const* info = sSpellMgr->GetSpellInfo(OvercorrectionHeal);
+    if (!info)
+        return;
+    int32 duration = player->CalcSpellDuration(info);
+    player->ApplySpellMod(OvercorrectionHeal, SPELLMOD_DURATION, duration);
+    uint32 ticks = std::max(1, duration / int32(std::max(1u, info->Effects[EFFECT_0].Amplitude)));
+    uint64 overhealing = healingIncludingOverheal - healing;
+    int32 tick = int32(std::min<uint64>(overhealing * 30 / 100 / ticks, INT32_MAX));
+    if (tick)
+        player->CastCustomSpell(OvercorrectionHeal, SPELLVALUE_BASE_POINT0, tick, target, true);
 }
 
 void CastEpicRecovery(Player* player, Unit* primary)
@@ -206,14 +237,14 @@ public:
     void OnSpellCast(Spell* spell, Unit* caster, SpellInfo const* info, bool) override
     {
         Player* player = Chronomancer(caster);
-        if (!player || spell->IsTriggered())
+        if (!player)
             return;
         for (uint32 aeon : {RenewalAeon, ResilienceAeon, ProtectionAeon, OblivionAeon})
             if (info->Id == aeon)
                 for (uint32 other : {RenewalAeon, ResilienceAeon, ProtectionAeon, OblivionAeon})
                     if (other != aeon)
                         player->RemoveAurasDueToSpell(other);
-        if (!IsRank(info->Id, Epoch))
+        if (spell->IsTriggered() || !IsRank(info->Id, Epoch))
             return;
         Aura* sands = player->GetAura(Sands);
         if (sands && sands->GetStackAmount() >= 5)
@@ -239,11 +270,13 @@ public:
             if (!spell->IsTriggered() && player->HasAura(KeepAccelerating))
                 SpreadRecovery(player, target, KeepAcceleratingSpread);
         }
+        else if (IsRank(id, CorrectTheMistake))
+            ApplyOvercorrection(player, target, healing, spell->GetScriptHealingIncludingOverheal());
         else if (IsRank(id, Fortify))
             ExtendRecovery(player, target);
         else if (IsRank(id, Epoch))
         {
-            ApplyEpochAeon(player, target, healing);
+            ApplyEpochAeon(player, target, healing, spell->GetScriptHealingIncludingOverheal());
             if (critical && player->HasAura(CadenceTalent))
                 player->CastSpell(player, Cadence, true);
             if (healing && player->HasAura(OrderlyTalent))
@@ -274,7 +307,6 @@ class aura_ascension_timeline_tether : public AuraScript
     {
         PreventDefaultAction();
         Player* player = GetTarget()->ToPlayer();
-        // The copied helper names only rank one. Apply its delta to every learned Fortify rank.
         for (auto const& [id, state] : player->GetSpellMap())
             if (player->HasSpell(id) && IsRank(id, Fortify))
                 player->ModifySpellCooldown(id, Amount(TetherCooldown));
@@ -288,9 +320,54 @@ class aura_ascension_timeline_tether : public AuraScript
     }
 };
 
+class aura_ascension_borrowed_time : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_borrowed_time);
+
+    bool Validate(SpellInfo const*) override { return ValidateSpellInfo({BorrowedTimeHeal}); }
+
+    bool CheckProc(ProcEventInfo& event)
+    {
+        DamageInfo* damage = event.GetDamageInfo();
+        return Chronomancer(GetTarget()) && damage && damage->GetVictim() == GetTarget() &&
+            damage->GetDamage() && (damage->GetSchoolMask() & SPELL_SCHOOL_MASK_NORMAL);
+    }
+
+    void Restore(AuraEffect const* effect, ProcEventInfo& event)
+    {
+        PreventDefaultAction();
+        Unit* player = GetTarget();
+        uint64 amount = uint64(event.GetDamageInfo()->GetDamage()) * uint64(std::max(0, effect->GetAmount())) / 100;
+        if (amount)
+            player->CastCustomSpell(BorrowedTimeHeal, SPELLVALUE_BASE_POINT0,
+                int32(std::min<uint64>(amount, INT32_MAX)), player, true);
+    }
+
+    void Register() override
+    {
+        DoCheckProc += AuraCheckProcFn(aura_ascension_borrowed_time::CheckProc);
+        OnEffectProc += AuraEffectProcFn(aura_ascension_borrowed_time::Restore,
+            EFFECT_0, SPELL_AURA_DUMMY);
+    }
+};
+
 void ApplyTimeContracts(SpellInfo* info)
 {
-    if (!info || info->SpellFamilyName != 28)
+    if (!info)
+        return;
+    if (info->Id == Oblivion)
+    {
+        info->SchoolMask = SPELL_SCHOOL_MASK_MAGIC;
+        info->Effects[EFFECT_0].TargetA = SpellImplicitTargetInfo(TARGET_UNIT_TARGET_ENEMY);
+        info->Effects[EFFECT_0].TargetB = SpellImplicitTargetInfo(0);
+        info->AttributesEx2 |= SPELL_ATTR2_CANT_CRIT;
+        info->AttributesEx3 |= SPELL_ATTR3_IGNORE_CASTER_MODIFIERS;
+        info->RangeEntry = sSpellRangeStore.LookupEntry(13);
+        info->Effects[EFFECT_0].DieSides = 0;
+        info->Effects[EFFECT_0].RealPointsPerLevel = 0.0f;
+        info->Effects[EFFECT_0].BonusMultiplier = 0.0f;
+    }
+    if (info->SpellFamilyName != 28)
         return;
     if (IsRank(info->Id, Fortify))
         info->Effects[EFFECT_1].Effect = 0;
@@ -298,8 +375,16 @@ void ApplyTimeContracts(SpellInfo* info)
         info->StackAmount = 5;
     if (info->Id == TimeOut || info->Id == TimeOutRankTwo || info->Id == TimeOutRankThree)
         info->Effects[EFFECT_1].ApplyAuraName = SPELL_AURA_OBS_MOD_POWER;
+    if (info->Id == ExpeditingTime)
+    {
+        if (SpellInfo const* stasis = sSpellMgr->GetSpellInfo(TimeOutStasis))
+        {
+            info->Effects[EFFECT_0].SpellClassMask |= stasis->SpellFamilyFlags;
+            info->Effects[EFFECT_1].SpellClassMask |= stasis->SpellFamilyFlags;
+        }
+    }
     for (uint32 id : {RenewalAeon, ResilienceAeon, ProtectionAeon, KeepAccelerating, CadenceTalent,
-        OrderlyTalent, EndlessSandsTalent, EpicRecovery, TimelineTether})
+        OrderlyTalent, EndlessSandsTalent, EpicRecovery, TimelineTether, BorrowedTime, Overcorrection})
         if (info->Id == id)
         {
             info->Effects[EFFECT_0].ApplyAuraName = SPELL_AURA_DUMMY;
@@ -310,9 +395,10 @@ void ApplyTimeContracts(SpellInfo* info)
         info->Effects[EFFECT_2].ApplyAuraName = SPELL_AURA_DUMMY;
         info->Effects[EFFECT_2].TriggerSpell = 0;
     }
-    if (info->Id == Renewal || info->Id == Protection || info->Id == Oblivion)
+    if (info->Id == Renewal)
+        info->AttributesCu |= SPELL_ATTR0_CU_AURA_CANNOT_BE_SAVED;
+    if (info->Id == Renewal || info->Id == Protection || info->Id == OvercorrectionHeal)
     {
-        // These copy an already modified Epoch heal. The periodic heal cannot critically hit again.
         info->AttributesEx2 |= SPELL_ATTR2_CANT_CRIT;
         info->AttributesEx3 |= SPELL_ATTR3_IGNORE_CASTER_MODIFIERS;
         info->AttributesEx4 |= SPELL_ATTR4_IGNORE_DAMAGE_TAKEN_MODIFIERS;
@@ -339,4 +425,5 @@ void AddSC_AscensionChronomancerTime()
     new chronomancer_time_casts();
     new chronomancer_time_contracts();
     RegisterSpellScript(aura_ascension_timeline_tether);
+    RegisterSpellScript(aura_ascension_borrowed_time);
 }

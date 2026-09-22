@@ -1,4 +1,4 @@
-"""Exercise Sentry initialization, native attack admission, firing and model scale.
+CLI_DESCRIPTION = """Exercise Sentry initialization, native attack admission, firing and model scale.
 
 Uses actual source blocks with bounded world/visibility/cast transport dependencies.
 No server build, database service, installed files or gameplay state is changed.
@@ -20,7 +20,7 @@ method = runpy.run_path(str(HERE.parent / "client_compat/run.py"))["method"]
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=CLI_DESCRIPTION)
     parser.add_argument("--source-ref", help="Read C++ from a local Git ref to reproduce the pre-fix failure.")
     args = parser.parse_args()
 
@@ -30,15 +30,12 @@ def main():
         return (ROOT / path).read_text(encoding="utf-8")
 
     summons = source("modules/mod-ascension-compat/src/AscensionTinkerSummons.cpp")
+    tinker = source("modules/mod-ascension-compat/src/AscensionTinker.cpp")
     unit = source("src/server/game/Entities/Unit/Unit.cpp")
     initialization = method(summons, "void IsSummonedBy(WorldObject* summoner)")
-    # Keep the real owner/class guard and control registration. Scaling and motion
-    # below this boundary do not implement the native player-control flags.
     initialization = initialization[:initialization.index("        me->SetReactState")] + "}"
     initialization = initialization.replace(" override", "")
     attack = method(unit, "bool Unit::_IsValidAttackTarget(")
-    # Actual immunity and CvC admission: later PvP/reputation rules are outside
-    # this fixture. Friendly/visibility/LoS filtering is exercised in TurretTarget.
     attack = attack[attack.index("    // check flags"):attack.index("    // PvP, PvC, CvP case")]
     harness = (HERE / "harness.cpp").read_text(encoding="utf-8")
     for marker, code in (
@@ -46,6 +43,9 @@ def main():
         ("ADMISSION", attack),
         ("TIMER", method(unit, "void Unit::resetAttackTimer(")),
         ("TURRET", method(summons, "bool Turret(")),
+        ("NOTIFY_ATTACK", method(tinker, "bool NotifyAttack(")),
+        ("NOTIFY_SPELL_ATTACK", method(tinker, "bool NotifySpellAttack(")),
+        ("OBSERVE_ATTACK", method(tinker, "void ObserveAttack(")),
         ("TARGET", method(summons, "Unit* TurretTarget(")),
         ("UPDATE", method(summons, "void UpdateTurret(")),
     ):

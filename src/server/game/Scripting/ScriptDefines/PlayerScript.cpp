@@ -21,10 +21,16 @@
 #include "World.h"
 
 #include <algorithm>
+#include <limits>
 
 void ScriptMgr::OnPlayerBeforeDurabilityRepair(Player* player, ObjectGuid npcGUID, ObjectGuid itemGUID, float& discountMod, uint8 guildBank)
 {
     CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_BEFORE_DURABILITY_REPAIR, script->OnPlayerBeforeDurabilityRepair(player, npcGUID, itemGUID, discountMod, guildBank));
+}
+
+bool ScriptMgr::OnPlayerBankerActivate(Player* player, ObjectGuid banker)
+{
+    CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_ON_BANKER_ACTIVATE, !script->OnPlayerBankerActivate(player, banker));
 }
 
 void ScriptMgr::OnPlayerGossipSelect(Player* player, uint32 menu_id, uint32 sender, uint32 action)
@@ -139,7 +145,19 @@ void ScriptMgr::OnPlayerBeforeSendLoot(Player* player, ObjectGuid lootGuid, Loot
 
 void ScriptMgr::OnPlayerGiveXP(Player* player, uint32& amount, Unit* victim, uint8 xpSource)
 {
+    amount = static_cast<uint32>(std::min(double(amount) * sWorld->getRate(RATE_XP_GLOBAL),
+        double(std::numeric_limits<uint32>::max())));
     CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_GIVE_EXP, script->OnPlayerGiveXP(player, amount, victim, xpSource));
+}
+
+uint8 ScriptMgr::GetMaxAllowedLevel(Player* player)
+{
+    uint8 cap = 0;
+    CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_GET_MAX_ALLOWED_LEVEL,
+        uint8 const scriptCap = script->OnPlayerGetMaxAllowedLevel(player);
+        if (scriptCap && (!cap || scriptCap < cap))
+            cap = scriptCap;);
+    return cap;
 }
 
 bool ScriptMgr::OnPlayerReputationChange(Player* player, uint32 factionID, int32& standing, bool incremental)
@@ -933,9 +951,39 @@ bool ScriptMgr::OnPlayerCanResurrect(Player* player)
     CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_CAN_RESURRECT, !script->OnPlayerCanResurrect(player));
 }
 
+bool ScriptMgr::OnPlayerCanEnterManastorm(Player* player)
+{
+    CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_CAN_ENTER_MANASTORM, !script->OnPlayerCanEnterManastorm(player));
+}
+
+void ScriptMgr::OnPlayerBankWithdraw(Player* player, uint8 kind)
+{
+    CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_BANK_WITHDRAW, script->OnPlayerBankWithdraw(player, kind));
+}
+
+bool ScriptMgr::OnPlayerEnvironmentalDamage(Player* player, uint32 type, uint32 damage)
+{
+    CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_ON_PLAYER_ENVIRONMENTAL_DAMAGE, !script->OnPlayerEnvironmentalDamage(player, type, damage));
+}
+
+bool ScriptMgr::OnPlayerBreathInverted(Player* player)
+{
+    CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(PlayerScript, PLAYERHOOK_ON_PLAYER_BREATH_INVERTED, script->OnPlayerBreathInverted(player));
+}
+
 bool ScriptMgr::OnPlayerCanGiveLevel(Player* player, uint8 newLevel)
 {
     CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_ON_CAN_GIVE_LEVEL, !script->OnPlayerCanGiveLevel(player, newLevel));
+}
+
+bool ScriptMgr::OnPlayerCanRegenerate(Player* player, int32 power)
+{
+    CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_ON_CAN_REGENERATE, !script->OnPlayerCanRegenerate(player, power));
+}
+
+bool ScriptMgr::OnPlayerCanEnergize(Player* player, int32 power)
+{
+    CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_ON_CAN_ENERGIZE, !script->OnPlayerCanEnergize(player, power));
 }
 
 void ScriptMgr::OnPlayerSendListInventory(Player* player, ObjectGuid vendorGuid, uint32& vendorEntry)

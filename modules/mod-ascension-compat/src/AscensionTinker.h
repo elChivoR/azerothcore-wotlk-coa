@@ -24,13 +24,16 @@ struct TinkerState
     TaskScheduler scheduler;
     std::set<ObjectGuid> summons;
     std::set<ObjectGuid> moduleTargets;
-    ObjectGuid focus, reconstruction;
+    ObjectGuid focus, observedVictim, observedAutoRepeatTarget, reconstruction;
     uint32 module = 0;
     uint64 sequence = 0;
     bool event = false, refreshing = false;
 };
 Player* Owner(Unit const* unit);
 TinkerState& State(Player* player);
+bool NotifyAttack(Player* player, Unit* target);
+bool NotifySpellAttack(Player* player, SpellInfo const* spellInfo, Unit* target);
+void ObserveAttack(Player* player);
 bool Named(SpellInfo const* info, uint32 root);
 bool Any(SpellInfo const* info, std::initializer_list<uint32> roots);
 bool Derived(SpellInfo const* info);
@@ -72,5 +75,5 @@ void Detonate(Player* player);
 void Scale(Player* player, Creature* creature, bool initial);
 uint32 SummonVulnerability(Player* player, Unit* attacker, Unit* target);
 void ApplyContracts(SpellInfo* info);
-} // namespace AscensionTinker
+}
 #endif

@@ -37,7 +37,7 @@ bool Ranged(ProcEventInfo const& event)
 {
     return Direct(event) &&
         (event.GetTypeMask() & (PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS) ||
-        Family(event.GetSpellInfo(), 1, 8)); // Berserker Axe's separately triggered damage
+        Family(event.GetSpellInfo(), 1, 8));
 }
 
 void Bleed(Unit* owner, Unit* target, uint32 id, uint32 damage, uint32 percent)
@@ -77,7 +77,7 @@ class aura_ascension_barbarian_event : public AuraScript
         aura->SetDuration(duration);
     }
 
-    void ResetExtension(AuraEffect const* effect, AuraEffectHandleModes /*mode*/)
+    void ResetExtension(AuraEffect const* effect, AuraEffectHandleModes)
     {
         if (effect->GetEffIndex() == EFFECT_0)
         {
@@ -115,6 +115,7 @@ class aura_ascension_barbarian_event : public AuraScript
             case 707764: return !outgoing && Direct(event);
             case 705240: return outgoing && Direct(event) && (event.GetSchoolMask() & SPELL_SCHOOL_MASK_NORMAL);
             case 804745: return outgoing && Direct(event) && Family(info, 1, 64);
+            case 804746: return outgoing && Direct(event) && (sid == 500919 || (sid >= 504912 && sid <= 504916));
             case 520539: return outgoing && Melee(event);
             case 805997: return outgoing && Direct(event) && critical && Spear(info);
             case 805893: return outgoing && Direct(event) && sid == 255846;
@@ -191,6 +192,7 @@ class aura_ascension_barbarian_event : public AuraScript
             case 300499: Bleed(owner, other, 783054, damage, 30); break;
             case 705240: cast(706393); break;
             case 804745: cast(570739, false); break;
+            case 804746: cast(560916); break;
             case 520539:
                 owner->CastCustomSpell(524675, SPELLVALUE_BASE_POINT0, int32(damage / 10), owner, TRIGGERED_FULL_MASK);
                 cast(524684);
@@ -272,7 +274,6 @@ class aura_ascension_barbarian_event : public AuraScript
             case 573077:
                 if (Unit* caster = GetCaster())
                 {
-                    // The active promise names owner AP; the pet's own SP is irrelevant.
                     uint32 child = GetSpellInfo()->Effects[EFFECT_0].TriggerSpell;
                     SpellInfo const* helper = sSpellMgr->GetSpellInfo(child);
                     int32 base = id == 573077 ? GetEffect(EFFECT_0)->GetAmount() :
@@ -302,7 +303,6 @@ class spell_ascension_barbarian_conversion : public SpellScript
 
     void Convert(SpellEffIndex index)
     {
-        // Forwarded resolved amounts must not acquire AP/SP or damage modifiers again.
         PreventHitDefaultEffect(index);
         int32 value = GetSpellValue()->EffectBasePoints[index] + (GetSpellInfo()->Effects[index].DieSides ? 1 : 0);
         if (GetSpellInfo()->Effects[index].Effect == SPELL_EFFECT_HEAL)
@@ -322,12 +322,35 @@ class aura_ascension_barbarian_bleed : public AuraScript
 {
     PrepareAuraScript(aura_ascension_barbarian_bleed);
 
-    void Amount(AuraEffect const* /*effect*/, int32& /*amount*/, bool& recalculate) { recalculate = false; }
+    void Amount(AuraEffect const*, int32&, bool& recalculate) { recalculate = false; }
 
     void Register() override
     {
         DoEffectCalcAmount += AuraEffectCalcAmountFn(aura_ascension_barbarian_bleed::Amount,
             EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE);
+    }
+};
+
+class barbarian_grisly_meal : public PlayerScript
+{
+public:
+    barbarian_grisly_meal() : PlayerScript("barbarian_grisly_meal",
+        {PLAYERHOOK_ON_PVP_KILL, PLAYERHOOK_ON_CREATURE_KILL}) { }
+
+    void OnPlayerPVPKill(Player* killer, Player* killed) override { Reward(killer, killed); }
+    void OnPlayerCreatureKill(Player* killer, Creature* killed) override { Reward(killer, killed); }
+
+private:
+    static void Reward(Player* player, Unit* killed)
+    {
+        if (player->getClass() != CLASS_BARBARIAN || !player->isHonorOrXPTarget(killed))
+            return;
+        for (uint32 rank : {804765u, 807946u, 807947u, 807948u})
+            if (player->HasSpell(rank))
+            {
+                player->CastSpell(player, 804755, true);
+                return;
+            }
     }
 };
 }
@@ -337,4 +360,5 @@ void AddAscensionBarbarianEventScripts()
     RegisterSpellScript(aura_ascension_barbarian_event);
     RegisterSpellScript(spell_ascension_barbarian_conversion);
     RegisterSpellScript(aura_ascension_barbarian_bleed);
+    new barbarian_grisly_meal();
 }

@@ -1,8 +1,7 @@
-"""Execute the Primalist #88 callbacks with bounded world APIs and native enum values."""
+CLI_DESCRIPTION = """Execute the Primalist #88 callbacks with bounded world APIs and native enum values."""
 import argparse
 import importlib.util
 from pathlib import Path
-import re
 import sqlite3
 import struct
 import tempfile
@@ -12,7 +11,7 @@ HERE = Path(__file__).resolve().parent
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=CLI_DESCRIPTION)
     parser.add_argument("--workspace-tools", type=Path, default=ROOT.parent / "tools")
     parser.add_argument("--spell-dbc", type=Path)
     args = parser.parse_args()
@@ -25,8 +24,17 @@ def main():
                        ("src/server/game/Spells/Auras/SpellAuraDefines.h", "AuraRemoveMode"),
                        ("src/server/shared/SharedDefines.h", "SpellCastResult")]:
         enums.append(native.extractor.extract((ROOT / path).read_text(), r"enum " + name + r"\b") + ";")
-    source = (ROOT / "modules/mod-ascension-compat/src/AscensionPrimalistTalents.cpp").read_text()
-    source = re.sub(r"^#include.*\n", "", source, flags=re.M)
+    full_source = (ROOT / "modules/mod-ascension-compat/src/AscensionPrimalistTalents.cpp").read_text()
+    declarations = [
+        (r"enum PrimalistAbilitySpells\b", ";"),
+        (r"Player\* Primalist\(", ""),
+        (r"class primalist_talent_events\b", ";"),
+        (r"class primalist_talent_casts\b", ";"),
+        (r"SpellCastResult CheckThroatClamp\(", ""),
+        (r"class spell_ascension_throat_clamp\b", ";"),
+    ]
+    source = "\n".join(native.extractor.extract(full_source, pattern) + suffix
+                       for pattern, suffix in declarations)
     source = source.replace(": public SpellScript\n{", ": public SpellScript\n{\npublic:")
     code = (HERE / "harness.cpp").read_text().replace("// NATIVE_ENUMS", "\n".join(enums))
     code = code.replace("// ACTUAL_SOURCE", source)
@@ -61,7 +69,7 @@ def main():
             assert rows[spell_id][95] == 227 and rows[spell_id][116] == 803138
         assert rows[803138][71:74] == (2, 0, 0) and rows[803138][208] == 37
         assert rows[802885][72] == 30 and rows[802885][111] == 1
-        assert rows[802885][81] == 29 and rows[802885][75] == 51  # 30-80 internal Rage (3-8 visible).
+        assert rows[802885][81] == 29 and rows[802885][75] == 51
     print("PASS: lethal boundary/cooldown, defense removal, owned Tremor crits, pet command gates and native helpers")
 
 

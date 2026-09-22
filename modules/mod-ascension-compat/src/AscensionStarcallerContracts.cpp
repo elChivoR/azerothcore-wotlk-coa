@@ -71,19 +71,22 @@ void ApplyContracts(SpellInfo* info)
         info->Effects[0].TriggerSpell = 0;
         dummy(1);
     }
+    if (id == 524643)
+        info->SpellFamilyFlags[1] |= 0x40;
     if (id == 706301)
         dummy(0);
     if (id == 800386)
     {
         mod(0, SPELL_AURA_ADD_PCT_MODIFIER, -100, SPELLMOD_CASTING_TIME, flag96(537133056, 8, 0));
-        // Silverstream doubles its native cost before the stock cost modifiers finish.
-        mod(1, SPELL_AURA_ADD_PCT_MODIFIER, 100, SPELLMOD_COST, flag96(536870912, 0, 0));
-        dummy(2);
+        mod(2, SPELL_AURA_ADD_PCT_MODIFIER, 100, SPELLMOD_COST, flag96(536870912, 0, 0));
+    }
+    if (id == 503583)
+    {
+        mod(1, SPELL_AURA_ADD_PCT_MODIFIER, -10, SPELLMOD_COST, flag96(0, 268435456, 0));
     }
     if (id == 802985)
     {
         dummy(0);
-        dummy(1);
         info->StackAmount = 4;
     }
     if (id == 804716)
@@ -110,8 +113,8 @@ void ApplyContracts(SpellInfo* info)
                 e.TargetA = SpellImplicitTargetInfo(TARGET_UNIT_TARGET_ALLY);
                 e.TargetB = SpellImplicitTargetInfo();
             }
-    if (id == 801401)
-        info->Effects[1].Effect = 0;
+    if (id == 680774)
+        info->MaxAffectedTargets = 0;
     if (id == 92133)
         info->Effects[0].BasePoints = 7;
     if (id == 92132 || id == 574349)
@@ -130,9 +133,13 @@ void ApplyContracts(SpellInfo* info)
     }
     if (id == 800393 || id == 800394)
         dummy(2);
+    if (id == 800394)
+    {
+        info->Effects[1].MiscValue = SPELLMOD_COST;
+        info->Effects[1].SpellClassMask = flag96(0, 0x40000, 0);
+    }
     if (id == 680822)
     {
-        // Native transform 22989 resolves Maiev's creature template (display 20628).
         info->Effects[1].ApplyAuraName = SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE;
         info->Effects[2].Effect = 0;
     }
@@ -202,7 +209,7 @@ void ApplyContracts(SpellInfo* info)
     if (id == 680779)
         mod(0, SPELL_AURA_ADD_PCT_MODIFIER, 20, SPELLMOD_DAMAGE, flag96(0, 1073872896, 0));
     if (id == 680770 || id == 704788)
-        dummy(0); // Their shared client mask also selects an unrelated ability.
+        dummy(0);
     if (Any(info, {804385, 807936}))
         info->Effects[0].MiscValue = SPELLMOD_DURATION, info->Effects[1].Effect = 0;
     if (id == 300995 || id == 504003)
@@ -218,22 +225,21 @@ void ApplyContracts(SpellInfo* info)
     if (id == 681521)
         info->Effects[0].ApplyAuraName = SPELL_AURA_ADD_FLAT_MODIFIER;
     if (id == 520481 || id == 520482)
-        dummy(0); // Exact extra targets are added once, with native target validation.
+        dummy(0);
     if (id == 807659)
         dummy(0);
     if (id == 707751 || id == 561062)
-        dummy(0), dummy(1); // Burning is evaluated against the actual target, including Trueshot helpers.
+        dummy(0), dummy(1);
     if (id == 801975)
-        // Only the Scattered Stars proc is reimplemented (Huntress Shot and Starcall add their extra
-        // stack in ApplyAbilities). Effect 1 is the native SPELLMOD_RANGE the tooltip promises, so it
-        // has to stay a real modifier or ranged abilities keep their unmodified range.
         dummy(0);
+    if (id == 524638)
+        info->Effects[0].MiscValue = SPELLMOD_EFFECT2;
     if (id == 807195)
         info->AuraInterruptFlags |= AURA_INTERRUPT_FLAG_TAKE_DAMAGE;
     if (id == 570231)
     {
         dummy(1);
-        info->ProcCharges = 0; // Reserved once by the native-target reflection observer.
+        info->ProcCharges = 0;
         info->ProcFlags = 0;
     }
     if (id == 954791)
@@ -259,7 +265,7 @@ void ApplyContracts(SpellInfo* info)
         info->Effects[0].TargetA = SpellImplicitTargetInfo(TARGET_DEST_TARGET_ENEMY);
         info->Effects[0].TargetB = SpellImplicitTargetInfo(TARGET_UNIT_DEST_AREA_ENEMY);
         info->Effects[0].RadiusEntry = info->Effects[2].RadiusEntry;
-        info->Effects[2].Effect = 0; // One authored comet amount per target; no extra 199-point second hit.
+        info->Effects[2].Effect = 0;
     }
     if (id == 807992)
     {
@@ -273,7 +279,7 @@ void ApplyContracts(SpellInfo* info)
             info->AttributesEx3 |= SPELL_ATTR3_IGNORE_CASTER_MODIFIERS;
     info->_InitializeExplicitTargetMask();
 }
-} // namespace AscensionStarcaller
+}
 namespace
 {
 using namespace AscensionStarcaller;
@@ -299,7 +305,6 @@ class starcaller_scaling : public UnitScript
         if (!player || !info)
             return;
         if (index == EFFECT_0 && Named(info, SPELL_STARFIRE_SHOT))
-            // Every rank's tooltip uses this helper for its flat damage; the weapon and mana terms stay separate.
             value = float(Amount(SPELL_STARFIRE_FLAT_DAMAGE, EFFECT_0, player));
         for (auto const& row : StarcallerCoefficients)
             if (row.spell == info->Id && row.effect == index)
@@ -322,7 +327,7 @@ class starcaller_scaling : public UnitScript
         if (info->Id == 574327 && !index)
             value = player->GetPower(POWER_MANA) * .25f;
         if (info->Id == 807816 && !index)
-            value = 10; // The ability callback supplies target max mana, not caster stats.
+            value = 10;
         if (info->Id == 805436 && !index)
             value += player->GetStat(STAT_INTELLECT) * .1f;
         if (info->Id == 801996 && !index)
@@ -337,8 +342,9 @@ class starcaller_scaling : public UnitScript
         if (!player || !target || Derived(info))
             return 1;
         if (player->GetDistance(target) > 30)
-            if (Aura* aura = player->GetAuraOfRankedSpell(704769))
-                return 1 + Amount(aura->GetId(), 1) / 100.0f;
+            for (uint32 rank : {704770u, 704769u})
+                if (player->HasAura(rank))
+                    return 1 + Amount(rank, 1) / 100.0f;
         return 1;
     }
     void ModifySpellDamageTaken(Unit* target, Unit* caster, int32& damage, SpellInfo const* info) override
@@ -361,7 +367,10 @@ class starcaller_scaling : public UnitScript
         float factor = 1;
         if (player->HasAura(801989) && target->GetHealthPct() < 20)
             factor *= 1.3f;
-        if (Aura* aura = player->GetAuraOfRankedSpell(704756))
+        Aura* aura = player->GetAura(704757);
+        if (!aura)
+            aura = player->GetAura(704756);
+        if (aura)
             for (auto const& pair : target->GetAppliedAuras())
                 if (pair.second->GetBase()->GetSpellInfo()->Dispel == DISPEL_POISON ||
                     pair.second->GetBase()->GetSpellInfo()->Dispel == DISPEL_DISEASE)
@@ -372,7 +381,7 @@ class starcaller_scaling : public UnitScript
         heal = uint32(heal * factor);
     }
 };
-} // namespace
+}
 void AddSC_AscensionStarcallerContracts()
 {
     new starcaller_scaling();

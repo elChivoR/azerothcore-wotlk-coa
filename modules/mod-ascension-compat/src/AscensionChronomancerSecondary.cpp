@@ -16,6 +16,7 @@ namespace
 enum ChronomancerSecondarySpells : uint32
 {
     SPELL_MELT_REALITY = 806335,
+    SPELL_MIND_MELT = 572851,
     SPELL_MELT_COPY_VALUE = 504727,
     SPELL_MELT_COPY = 807570,
     SPELL_DESYNCHRONIZATION = 561310,
@@ -48,7 +49,6 @@ public:
     {
         if (!target || !target->IsInWorld() || !damage)
             return;
-        // Allied periodic damage also contributes. Snapshot owners before a copy can remove another mark.
         std::vector<ObjectGuid> owners;
         for (auto const& pair : target->GetAppliedAuras())
         {
@@ -70,6 +70,33 @@ public:
                     player->CastCustomSpell(SPELL_MELT_COPY, SPELLVALUE_BASE_POINT0,
                         int32(std::min<uint64>(amount, std::numeric_limits<int32>::max())), target, true);
             }
+    }
+};
+
+class chronomancer_mind_melt_taken : public UnitScript
+{
+public:
+    chronomancer_mind_melt_taken() : UnitScript("chronomancer_mind_melt_taken", true,
+        {UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK}) { }
+
+    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage,
+        SpellInfo const* info) override
+    {
+        if (!target || !attacker || !damage || !info ||
+            info->HasAttribute(SPELL_ATTR4_IGNORE_DAMAGE_TAKEN_MODIFIERS))
+            return;
+        if (!info->HasAura(SPELL_AURA_PERIODIC_DAMAGE) && !info->HasAura(SPELL_AURA_PERIODIC_DAMAGE_PERCENT) &&
+            !info->HasAura(SPELL_AURA_PERIODIC_LEECH))
+            return;
+        AuraEffect const* melt = target->GetAuraEffect(SPELL_MIND_MELT, EFFECT_0, attacker->GetGUID());
+        if (!melt || melt->GetAmount() <= 0)
+            return;
+        if (int32 const schoolMask = melt->GetMiscValue();
+            schoolMask && !(uint32(schoolMask) & uint32(info->GetSchoolMask())))
+            return;
+        uint64 const bonus = uint64(damage) * uint64(melt->GetAmount()) / 100;
+        damage = uint32(std::min<uint64>(uint64(damage) + bonus,
+            std::numeric_limits<uint32>::max()));
     }
 };
 
@@ -176,7 +203,6 @@ class aura_ascension_ripple_release : public AuraScript
         AuraEffect const* timer = GetEffect(EFFECT_1);
         if (SecondaryChronomancer(player) && player == GetCaster() && timer && timer->GetTickNumber() >= 6 &&
             GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_DEATH)
-            // Six native 250 ms ticks meet the minimum. Their authored spell modifier scales this heal.
             player->CastSpell(player, SPELL_RIPPLE_HEAL, true);
         player->RemoveAurasDueToSpell(SPELL_RIPPLE_CHARGE, player->GetGUID());
     }
@@ -234,7 +260,6 @@ public:
     void OnSpellCast(Spell* spell, Unit* caster, SpellInfo const* info, bool) override
     {
         if (SecondaryChronomancer(caster) && !spell->IsTriggered() && info->Id == SPELL_ARC_COLLISION)
-            // Arc Collision is immediate: every target has received its duration before this callback.
             caster->RemoveAurasDueToSpell(SPELL_ECHO_FRAGMENT, caster->GetGUID());
     }
 };
@@ -267,6 +292,7 @@ public:
 void AddSC_AscensionChronomancerSecondary()
 {
     new chronomancer_melt_periodic();
+    new chronomancer_mind_melt_taken();
     new chronomancer_secondary_casts();
     new chronomancer_secondary_metadata();
     RegisterSpellScript(spell_ascension_melt_copy);

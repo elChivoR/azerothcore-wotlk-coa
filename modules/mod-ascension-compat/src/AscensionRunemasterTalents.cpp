@@ -1,5 +1,6 @@
 /* Copyright (C) 2016+ AzerothCore, GNU AGPL v3. */
 #include "AscensionRunemasterTalents.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "SpellAuras.h"
@@ -32,9 +33,6 @@ void SyncStonePetroglyph(Player* player)
         player->CastSpell(player, 712310, true);
 }
 
-// Palm Sigil (805380/805381/805382) gates its cast on CasterAuraSpell 808089, a marker spell
-// literally named "Runeshroud or Waveforged" that nothing else ever grants, making it permanently
-// uncastable. Mirror the real Runeshroud/Waveforged state onto it instead.
 void SyncRuneshroudOrWaveforged(Player* player)
 {
     bool active = player->HasAura(500288, player->GetGUID()) || player->HasAura(705565, player->GetGUID());
@@ -42,6 +40,31 @@ void SyncRuneshroudOrWaveforged(Player* player)
         player->RemoveAurasDueToSpell(808089, player->GetGUID());
     else if (!player->HasAura(808089, player->GetGUID()))
         player->CastSpell(player, 808089, true);
+}
+
+constexpr uint32 SPELL_PERMAFROST_RUNE = 804060;
+constexpr uint32 SPELL_PERMAFROST_MARKER = 807114;
+constexpr uint32 SPELL_RUNESHROUD = 500288;
+constexpr int32 PERMAFROST_PLAYER_DURATION = 8000;
+
+void ApplyPermafrostAura(Unit* unit, Aura* aura)
+{
+    uint32 id = aura->GetId();
+    if (id != SPELL_PERMAFROST_RUNE && id != SPELL_PERMAFROST_MARKER)
+        return;
+    if (unit->IsPlayer() && aura->GetMaxDuration() > PERMAFROST_PLAYER_DURATION)
+    {
+        aura->SetMaxDuration(PERMAFROST_PLAYER_DURATION);
+        aura->SetDuration(PERMAFROST_PLAYER_DURATION);
+    }
+    if (id != SPELL_PERMAFROST_RUNE)
+        return;
+    Player* caster = ObjectAccessor::FindPlayer(aura->GetCasterGUID());
+    if (!caster || caster->getClass() != CLASS_SPIRIT_MAGE || !caster->HasAura(SPELL_RUNESHROUD, caster->GetGUID()))
+        return;
+    uint32 remaining = caster->GetSpellCooldownDelay(SPELL_PERMAFROST_RUNE);
+    if (remaining)
+        caster->ModifySpellCooldown(SPELL_PERMAFROST_RUNE, -int32(remaining * 4 / 5));
 }
 
 class runemaster_talent_events : public UnitScript
@@ -52,6 +75,8 @@ public:
 
     void OnAuraApply(Unit* unit, Aura* aura) override
     {
+        if (unit && aura)
+            ApplyPermafrostAura(unit, aura);
         Player* player = unit ? unit->ToPlayer() : nullptr;
         if (!player || player->getClass() != CLASS_SPIRIT_MAGE || !aura)
             return;
@@ -64,6 +89,8 @@ public:
 
     void OnAuraRemove(Unit* unit, AuraApplication* application, AuraRemoveMode mode) override
     {
+        if (unit && application && application->GetBase()->GetId() == SPELL_PERMAFROST_RUNE)
+            unit->RemoveAurasDueToSpell(SPELL_PERMAFROST_MARKER, application->GetBase()->GetCasterGUID());
         Player* player = unit ? unit->ToPlayer() : nullptr;
         if (!player || player->getClass() != CLASS_SPIRIT_MAGE || !application)
             return;
@@ -82,10 +109,13 @@ public:
 
 void ApplyAscensionRunemasterTalentContracts(SpellInfo* info)
 {
+    if (info->Id == SPELL_PERMAFROST_RUNE)
+    {
+        info->AuraInterruptFlags |= AURA_INTERRUPT_FLAG_TAKE_DAMAGE;
+        return;
+    }
     if (info->Id != 712310 || info->SpellFamilyName != 38)
         return;
-    // The native periodic heal and effect-98 immunity already exist. Complete
-    // knockback immunity for the separate destination-based effect as well.
     auto& effect = info->Effects[EFFECT_1];
     effect.Effect = SPELL_EFFECT_APPLY_AURA;
     effect.ApplyAuraName = SPELL_AURA_EFFECT_IMMUNITY;

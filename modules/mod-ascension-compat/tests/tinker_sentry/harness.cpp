@@ -9,8 +9,10 @@
 
 using uint32 = std::uint32_t;
 using int32 = std::int32_t;
+using ObjectGuid = uint32;
 using WeaponAttackType = uint32;
 constexpr uint32 RANGED_ATTACK = 2, UNIT_STATE_CONTROLLED = 1, UNIT_STATE_CASTING = 2;
+constexpr uint32 CURRENT_AUTOREPEAT_SPELL = 3;
 constexpr uint32 SPELL_AURA_MOD_PACIFY = 3, SPELL_AURA_MOD_PACIFY_SILENCE = 4;
 constexpr uint32 UNIT_FLAG_PLAYER_CONTROLLED = 1, UNIT_FLAG_NON_ATTACKABLE = 2, UNIT_FLAG_TAXI_FLIGHT = 4;
 constexpr uint32 UNIT_FLAG_NOT_ATTACKABLE_1 = 8, UNIT_FLAG_NON_ATTACKABLE_2 = 16;
@@ -64,6 +66,7 @@ struct Player : Unit
     Player() { flags = UNIT_FLAG_PLAYER_CONTROLLED; guid = 1; }
     Unit* victim = nullptr;
     Unit* selected = nullptr;
+    struct Spell* autoRepeat = nullptr;
     std::set<Unit*> combat, m_Controlled;
     bool IsValidAttackTarget(Unit* target) const
     {
@@ -72,6 +75,7 @@ struct Player : Unit
     bool IsHostileTo(Unit* target) const { return target->hostile; }
     bool IsInCombatWith(Unit* target) const { return combat.contains(target); }
     Unit* GetVictim() const { return victim; }
+    Spell* GetCurrentSpell(uint32 type) const;
     Unit* GetSelectedUnit() const { return selected; }
     uint32 GetFaction() const { return 1; }
 };
@@ -102,8 +106,28 @@ struct Creature : Unit
 
 struct SpellInfo
 {
+    uint32 SpellFamilyName = 34;
+    bool positive = false;
+    bool autoRepeatRanged = false;
+    bool IsPositive() const { return positive; }
+    bool IsAutoRepeatRangedSpell() const { return autoRepeatRanged; }
     float GetMaxRange(bool, Creature*) const { return 45; }
 } info;
+struct SpellTargets
+{
+    Unit* unitTarget = nullptr;
+    Unit* GetUnitTarget() const { return unitTarget; }
+};
+struct Spell
+{
+    SpellInfo info;
+    SpellTargets m_targets;
+    SpellInfo const* GetSpellInfo() const { return &info; }
+};
+Spell* Player::GetCurrentSpell(uint32 type) const
+{
+    return type == CURRENT_AUTOREPEAT_SPELL ? autoRepeat : nullptr;
+}
 struct Manager
 {
     SpellInfo const* GetSpellInfo(uint32 id) const { assert(id == 706689); return &info; }
@@ -124,6 +148,17 @@ void Cast(Creature* caster, Unit* target, uint32 id)
 
 // ACTUAL_TURRET
 
+struct TinkerState
+{
+    ObjectGuid focus = 0, observedVictim = 0, observedAutoRepeatTarget = 0;
+    std::set<ObjectGuid> summons;
+} tinkerState;
+TinkerState& State(Player*) { return tinkerState; }
+
+// ACTUAL_NOTIFY_ATTACK
+// ACTUAL_NOTIFY_SPELL_ATTACK
+// ACTUAL_OBSERVE_ATTACK
+
 struct Device
 {
     Creature* me;
@@ -140,24 +175,40 @@ int main()
     currentOwner = &player;
     Creature turret;
     Device ai{&turret};
-    Unit neutral, enemy;
-    neutral.guid = 2;
-    neutral.x = 10;
-    enemy.guid = 3;
-    enemy.x = 20;
-    enemy.hostile = true;
-    units = {{2, &neutral}, {3, &enemy}};
-    neighborhood = {&neutral, &enemy};
-    player.selected = &neutral;
-    player.combat.insert(&neutral);
+    Unit unregistered, mobA, mobB, mobC;
+    mobA.guid = 2;
+    mobA.x = 10;
+    mobA.hostile = true;
+    mobB.guid = 3;
+    mobB.x = 20;
+    mobB.hostile = true;
+    mobC.guid = 4;
+    mobC.x = 30;
+    mobC.hostile = true;
+    units = {{2, &mobA}, {3, &mobB}, {4, &mobC}};
+    neighborhood = {&mobA, &mobB, &mobC};
 
-    // Owner selection succeeds while an unregistered TempSummon's actual shot fails.
-    assert(ai.TurretTarget(&player) == &neutral);
-    assert(!turret.NativeAttackAdmission(&neutral));
+    player.selected = &mobA;
+    ObserveAttack(&player);
+    assert(!ai.TurretTarget(&player));
+
+    player.combat.insert(&mobA);
+    ObserveAttack(&player);
+    assert(!ai.TurretTarget(&player));
+
     ai.IsSummonedBy(&player);
+
+    player.combat.clear();
+    player.selected = nullptr;
+    player.victim = &mobA;
+    ObserveAttack(&player);
+    assert(ai.TurretTarget(&player) == &mobA);
+    unregistered.flags = UNIT_FLAG_NON_ATTACKABLE;
+    assert(!turret.NativeAttackAdmission(&unregistered));
+    unregistered.flags = 0;
     ai.UpdateTurret(&player);
-    assert(turret.facing == &neutral);
-    if (turret.shots.size() != 1) // Reproduces #89 before the control flags are initialized.
+    assert(turret.facing == &mobA);
+    if (turret.shots.size() != 1)
         return 89;
     assert(turret.m_ControlledByPlayer && turret.pvp == player.pvp);
     assert(player.m_Controlled.contains(&turret));
@@ -165,26 +216,124 @@ int main()
     ai.UpdateTurret(&player);
     assert(turret.shots.size() == 1);
 
-    neutral.immuneNPC = true;
-    assert(turret.NativeAttackAdmission(&neutral));
-    neutral.immunePC = true;
-    assert(!turret.NativeAttackAdmission(&neutral));
-    neutral.immunePC = false;
-    neutral.flags = UNIT_FLAG_NON_ATTACKABLE;
-    assert(!turret.NativeAttackAdmission(&neutral));
-    neutral.flags = 0;
+    mobA.immuneNPC = true;
+    assert(turret.NativeAttackAdmission(&mobA));
+    mobA.immunePC = true;
+    assert(!turret.NativeAttackAdmission(&mobA));
+    mobA.immunePC = false;
+    mobA.flags = UNIT_FLAG_NON_ATTACKABLE;
+    assert(!turret.NativeAttackAdmission(&mobA));
+    mobA.flags = 0;
 
-    ai.focus = enemy.guid;
+    player.combat.insert(&mobB);
+    player.selected = &mobB;
+    ObserveAttack(&player);
+    assert(ai.TurretTarget(&player) == &mobA);
+
+    SpellInfo rocket;
+    rocket.SpellFamilyName = 34;
+    rocket.positive = false;
+    assert(NotifySpellAttack(&player, &rocket, &mobB));
+    assert(State(&player).focus == mobB.guid);
+    assert(ai.TurretTarget(&player) == &mobB);
     turret.m_attackTimer[RANGED_ATTACK] = 0;
     turret.m_modAttackSpeedPct[RANGED_ATTACK] = 0.5f;
     ai.UpdateTurret(&player);
-    assert(turret.shots.size() == 2 && turret.facing == &enemy);
+    assert(turret.shots.size() == 2 && turret.facing == &mobB);
     assert(turret.m_attackTimer[RANGED_ATTACK] == 1000);
-    enemy.visible = false;
-    assert(ai.TurretTarget(&player) == &neutral);
-    neutral.los = false;
+
+    player.victim = &mobA;
+    ObserveAttack(&player);
+    assert(ai.TurretTarget(&player) == &mobB);
+
+    player.victim = &mobC;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobC.guid);
+    assert(ai.TurretTarget(&player) == &mobC);
+
+    player.victim = nullptr;
+    player.selected = &mobA;
+    player.combat.clear();
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobC.guid);
+    assert(ai.TurretTarget(&player) == &mobC);
+
+    tinkerState = {};
+    ai.IsSummonedBy(&player);
+    player.victim = nullptr;
+    player.selected = &mobA;
+    player.combat.clear();
+    player.autoRepeat = nullptr;
+    ObserveAttack(&player);
     assert(!ai.TurretTarget(&player));
-    neutral.los = true;
+
+    Spell autoShot;
+    autoShot.info.autoRepeatRanged = true;
+    autoShot.m_targets.unitTarget = &mobA;
+    player.autoRepeat = &autoShot;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobA.guid);
+    assert(ai.TurretTarget(&player) == &mobA);
+
+    autoShot.m_targets.unitTarget = &mobB;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobB.guid);
+    assert(ai.TurretTarget(&player) == &mobB);
+
+    player.autoRepeat = nullptr;
+    autoShot.m_targets.unitTarget = nullptr;
+    player.victim = &mobA;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobA.guid);
+    player.victim = nullptr;
+    player.autoRepeat = &autoShot;
+    autoShot.m_targets.unitTarget = &mobB;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobB.guid);
+    assert(ai.TurretTarget(&player) == &mobB);
+
+    player.victim = &mobC;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobC.guid);
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobC.guid);
+    assert(ai.TurretTarget(&player) == &mobC);
+
+    player.autoRepeat = nullptr;
+    autoShot.m_targets.unitTarget = nullptr;
+    player.victim = nullptr;
+    ObserveAttack(&player);
+    assert(NotifySpellAttack(&player, &rocket, &mobB));
+    assert(State(&player).focus == mobB.guid);
+    player.victim = &mobC;
+    ObserveAttack(&player);
+    assert(State(&player).focus == mobC.guid);
+    assert(ai.TurretTarget(&player) == &mobC);
+
+    SpellInfo positive;
+    positive.SpellFamilyName = 34;
+    positive.positive = true;
+    SpellInfo otherFamily;
+    otherFamily.SpellFamilyName = 1;
+    otherFamily.positive = false;
+    assert(!NotifySpellAttack(&player, &positive, &mobA));
+    assert(!NotifySpellAttack(&player, &otherFamily, &mobA));
+    assert(State(&player).focus == mobC.guid);
+
+    assert(NotifySpellAttack(&player, &rocket, &mobB));
+    mobB.alive = false;
+    assert(!ai.TurretTarget(&player));
+    mobB.alive = true;
+    mobB.x = 100;
+    assert(!ai.TurretTarget(&player));
+    mobB.x = 20;
+    mobB.visible = false;
+    assert(!ai.TurretTarget(&player));
+    mobB.visible = true;
+    mobB.los = false;
+    assert(!ai.TurretTarget(&player));
+    mobB.los = true;
+
     turret.m_attackTimer[RANGED_ATTACK] = 0;
     turret.pacified = true;
     ai.UpdateTurret(&player);
@@ -195,8 +344,10 @@ int main()
     assert(turret.shots.size() == 2);
     turret.state = 0;
     turret.upgraded = true;
+    player.victim = &mobA;
+    ObserveAttack(&player);
     ai.UpdateTurret(&player);
-    assert((turret.shots.back() == std::pair<uint32, float>(706694, neutral.x)));
+    assert((turret.shots.back() == std::pair<uint32, float>(706694, mobA.x)));
 
     Creature beacon, orphan;
     beacon.entry = 50037;

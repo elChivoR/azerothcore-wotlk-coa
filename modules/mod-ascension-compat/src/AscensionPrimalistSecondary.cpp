@@ -24,7 +24,11 @@ enum PrimalistSecondarySpells : uint32
     SPELL_EMBRACED_BY_EARTH = 561037,
     SPELL_EMBRACE_DISORIENT = 706200,
     SPELL_GAZE = 805919,
-    SPELL_GAZE_SLOW = 572908
+    SPELL_GAZE_SLOW = 572908,
+    SPELL_SAVAGE_FRENZY = 806549,
+    SPELL_TOTEM_WARRIOR = 704099,
+    SPELL_TOTEM_WARRIOR_HIT = 555732,
+    SPELL_BOON_OF_THE_BEAR = 500939
 };
 
 class primalist_secondary_auras : public UnitScript
@@ -57,6 +61,43 @@ public:
         if (aura->GetId() == SPELL_EARTHS_EMBRACE && mode == AURA_REMOVE_BY_EXPIRE &&
             player->IsAlive() && player->IsInWorld() && player->HasAura(SPELL_EMBRACED_BY_EARTH, player->GetGUID()))
             player->CastSpell(player, SPELL_EMBRACE_DISORIENT, true);
+    }
+};
+
+class spell_ascension_totem_warrior : public SpellScript
+{
+    PrepareSpellScript(spell_ascension_totem_warrior);
+
+    bool Validate(SpellInfo const*) override
+    {
+        return ValidateSpellInfo({SPELL_TOTEM_WARRIOR, SPELL_TOTEM_WARRIOR_HIT, SPELL_BOON_OF_THE_BEAR});
+    }
+
+    bool Load() override
+    {
+        return GetCaster()->IsPlayer() && GetCaster()->getClass() == CLASS_WILDWALKER;
+    }
+
+    void Repeat()
+    {
+        Unit* owner = GetCaster();
+        Unit* victim = GetHitUnit();
+        if (!victim || !victim->IsAlive() || owner->IsFriendlyTo(victim) || GetHitDamage() <= 0 ||
+            !owner->HasAura(SPELL_BOON_OF_THE_BEAR, owner->GetGUID()))
+            return;
+
+        if (AuraEffect const* talent = owner->GetAuraEffect(SPELL_TOTEM_WARRIOR, EFFECT_0, owner->GetGUID()))
+        {
+            int32 amount = int32(int64(GetHitDamage()) * std::clamp(talent->GetAmount(), 0, 100) / 100);
+            if (amount)
+                owner->CastCustomSpell(SPELL_TOTEM_WARRIOR_HIT, SPELLVALUE_BASE_POINT0, amount, victim,
+                    TRIGGERED_FULL_MASK, nullptr, talent);
+        }
+    }
+
+    void Register() override
+    {
+        AfterHit += SpellHitFn(spell_ascension_totem_warrior::Repeat);
     }
 };
 
@@ -93,9 +134,48 @@ class aura_ascension_volcanic_blast : public AuraScript
     }
 };
 
-// Hammer of Life (803973): melee attacks and abilities heal nearby allies and damage nearby enemies for $s1% of the
-// damage dealt. Both helpers use effect 0's percentage, as the tooltip does; effect 2's own 30% is not described.
-// The helpers pick their targets (up to 3 each, around the caster) from their own Spell.dbc records.
+class aura_ascension_natures_blessing : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_natures_blessing);
+
+    bool Validate(SpellInfo const* info) override
+    {
+        return info->SpellFamilyName == 37 && info->Effects[EFFECT_0].ApplyAuraName == 354 &&
+            info->Effects[EFFECT_0].TriggerSpell == 807561 && ValidateSpellInfo({807561});
+    }
+
+    bool Load() override
+    {
+        return GetUnitOwner()->IsPlayer() && GetUnitOwner()->getClass() == CLASS_WILDWALKER;
+    }
+
+    bool Check(ProcEventInfo& event)
+    {
+        SpellInfo const* info = event.GetSpellInfo();
+        HealInfo const* heal = event.GetHealInfo();
+        Unit* target = event.GetActionTarget();
+        bool seismicWave = info && (info->Id == 805462 || (info->Id >= 572873 && info->Id <= 572878));
+        return seismicWave && event.GetActor() == GetTarget() && target && target->IsAlive() &&
+            GetTarget()->IsFriendlyTo(target) && heal && heal->GetHeal();
+    }
+
+    void Proc(AuraEffect const* effect, ProcEventInfo& event)
+    {
+        PreventDefaultAction();
+        uint64 amount = uint64(event.GetHealInfo()->GetHeal()) * std::clamp(effect->GetAmount(), 0, 100) / 100;
+        if (amount)
+            GetTarget()->CastCustomSpell(807561, SPELLVALUE_BASE_POINT0,
+                int32(std::min<uint64>(amount, std::numeric_limits<int32>::max())),
+                event.GetActionTarget(), TRIGGERED_FULL_MASK, nullptr, effect);
+    }
+
+    void Register() override
+    {
+        DoCheckProc += AuraCheckProcFn(aura_ascension_natures_blessing::Check);
+        OnEffectProc += AuraEffectProcFn(aura_ascension_natures_blessing::Proc, EFFECT_0, AuraType(354));
+    }
+};
+
 class aura_ascension_hammer_of_life : public AuraScript
 {
     PrepareAuraScript(aura_ascension_hammer_of_life);
@@ -123,7 +203,7 @@ class aura_ascension_hammer_of_life : public AuraScript
             TRIGGERED_FULL_MASK);
     }
 
-    void IgnoreSecondTrigger(AuraEffect const* /*effect*/, ProcEventInfo& /*event*/)
+    void IgnoreSecondTrigger(AuraEffect const*, ProcEventInfo&)
     {
         PreventDefaultAction();
     }
@@ -149,7 +229,6 @@ public:
             !target || target == player || player->IsFriendlyTo(target) ||
             !player->HasAura(SPELL_CRACKING_EARTH, player->GetGUID()))
             return;
-        // The native result callback visits each unique target once, after all its effects.
         uint64 count = spell->GetScriptValue(SPELL_CRACKING_STACK) + 1;
         spell->SetScriptValue(SPELL_CRACKING_STACK, count);
         if (count == 5)
@@ -196,7 +275,15 @@ public:
     {
         if (info->SpellFamilyName != 37)
             return;
-        if (info->Id == SPELL_VOLCANIC_BLAST)
+        if (info->Id == SPELL_SAVAGE_FRENZY)
+        {
+            for (SpellEffectInfo& effect : info->Effects)
+                if (effect.IsAura() && effect.TargetA.GetTarget() == TARGET_UNIT_PET &&
+                    effect.TargetB.GetTarget() == 0)
+                    effect.TargetB = SpellImplicitTargetInfo(TARGET_UNIT_CASTER);
+            info->_InitializeExplicitTargetMask();
+        }
+        if (info->Id == SPELL_VOLCANIC_BLAST || info->Id == SPELL_TOTEM_WARRIOR_HIT)
         {
             info->AttributesEx2 |= SPELL_ATTR2_CANT_CRIT;
             info->AttributesEx3 |= SPELL_ATTR3_IGNORE_CASTER_MODIFIERS;
@@ -210,12 +297,11 @@ public:
             info->ProcFlags = 0;
         }
         if (info->Id == SPELL_CRACKING_STACK)
-            // E2 supplies native chain jumps. E1 is the separate area target-cap modifier.
             info->Effects[EFFECT_1].ApplyAuraName = SPELL_AURA_MOD_MAX_AFFECTED_TARGETS;
         if (info->Id == SPELL_EMBRACE_DISORIENT)
             info->AuraInterruptFlags |= AURA_INTERRUPT_FLAG_TAKE_DAMAGE;
         if (info->Id == SPELL_GAZE_SLOW)
-            info->ProcCharges = 1; // Native proc data spends this on the next melee/ranged swing, including misses.
+            info->ProcCharges = 1;
         if (info->Id == SPELL_ANCIENT_SLOW || info->Id == SPELL_CRACKING_STACK || info->Id == SPELL_GAZE_SLOW)
         {
             info->AttributesCu &= ~SPELL_ATTR0_CU_FORCE_AURA_SAVING;
@@ -224,11 +310,6 @@ public:
     }
 };
 
-// The Primalist spends Rage - 123 of its family-37 records carry a Rage cost, Seismic Smash among
-// them - but ChrClasses.dbc gives class 31 Mana as its display power. Unit::DealDamage grants Rage for
-// melee damage dealt and for damage received only when HasActivePowerType(POWER_RAGE) holds, and that
-// helper asks the player scripts first, otherwise comparing the display power, so auto attacks built
-// no Rage at all.
 class primalist_resources : public PlayerScript
 {
 public:
@@ -251,6 +332,8 @@ void AddSC_AscensionPrimalistSecondary()
     new primalist_volcanic_targets();
     new primalist_secondary_metadata();
     RegisterSpellScript(aura_ascension_volcanic_blast);
+    RegisterSpellScript(spell_ascension_totem_warrior);
+    RegisterSpellScript(aura_ascension_natures_blessing);
     RegisterSpellScript(aura_ascension_hammer_of_life);
     RegisterSpellScript(spell_ascension_gaze_of_theradras);
 }

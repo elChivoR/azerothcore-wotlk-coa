@@ -337,6 +337,14 @@ int32 GetDiminishingReturnsLimitDuration(DiminishingGroup group, SpellInfo const
     if (!IsDiminishingReturnsGroupDurationLimited(group))
         return 0;
 
+    // Stone Grip's active tooltip specifies eight seconds against players, before diminishing returns.
+    if (spellproto->SpellFamilyName == 37 && spellproto->Id == 800145)
+        return 8 * IN_MILLISECONDS;
+
+    // Gaze of Ysera's tooltip specifies eight seconds against players, before diminishing returns.
+    if (spellproto->SpellFamilyName == 30 && spellproto->Id == 806148)
+        return 8 * IN_MILLISECONDS;
+
     // Explicit diminishing duration
     switch (spellproto->SpellFamilyName)
     {

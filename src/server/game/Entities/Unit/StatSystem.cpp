@@ -490,8 +490,27 @@ void Player::UpdateAttackPowerAndDamage(bool ranged)
     }
     else
     {
-        // Barbarian uses Warrior melee AP independently of its Rogue compatibility for other systems.
-        if (getClass() == CLASS_BARBARIAN || IsClass(CLASS_PALADIN, CLASS_CONTEXT_STATS) ||
+        // CoA changelog 2026-07-09, entries 69019-69020, 69036-69038 and 69043, specifies these stat conversions.
+        // Only the coefficients are recovered: keep the existing level terms and offsets as compatibility values.
+        if (getClass() == CLASS_BARBARIAN)
+        {
+            val2 = level * 3.0f + GetStat(STAT_STRENGTH) + GetStat(STAT_AGILITY) - 20.0f;
+        }
+        else if (getClass() == CLASS_REAPER)
+        {
+            // The entry confirms Strength only; retain the unverified Agility term until it is measured.
+            val2 = level * 2.0f + GetStat(STAT_STRENGTH) * 2.0f + GetStat(STAT_AGILITY) - 20.0f;
+        }
+        else if (getClass() == CLASS_SUN_CLERIC)
+        {
+            val2 = GetStat(STAT_STRENGTH) * 2.0f - 10.0f;
+        }
+        else if (getClass() == CLASS_STARCALLER && GetShapeshiftForm() == FORM_NONE)
+        {
+            // Form-specific scaling is not established by the baseline character-panel correction.
+            val2 = GetStat(STAT_STRENGTH) + GetStat(STAT_AGILITY) - 20.0f;
+        }
+        else if (IsClass(CLASS_PALADIN, CLASS_CONTEXT_STATS) ||
             IsClass(CLASS_DEATH_KNIGHT, CLASS_CONTEXT_STATS) || IsClass(CLASS_WARRIOR, CLASS_CONTEXT_STATS))
         {
             val2 = level * 3.0f + GetStat(STAT_STRENGTH) * 2.0f - 20.0f;
@@ -874,9 +893,10 @@ void Player::UpdateParryPercentage()
     // No parry
     float value = 0.0f;
     m_realParry = 0.0f;
-    // Starcaller learns Parry, unlike its general Druid stat fallback.
-    // Use the Hunter parry curve for both its cap and diminishing coefficient.
-    Classes const parryClass = getClass() == CLASS_STARCALLER ? CLASS_HUNTER :
+    // Starcaller and Primalist need Hunter's parry curve; their general Druid fallback has no parry cap.
+    // Sun Cleric's March of the Valkyr uses the Paladin curve with its Strength-based melee scaling.
+    Classes const parryClass = getClass() == CLASS_STARCALLER || getClass() == CLASS_WILDWALKER ? CLASS_HUNTER :
+        getClass() == CLASS_SUN_CLERIC ? CLASS_PALADIN :
         GetLegacyClassForCustomClass(Classes(getClass()));
     uint32 const pclass = parryClass - 1;
     if (CanParry() && parry_cap[pclass] > 0.0f)

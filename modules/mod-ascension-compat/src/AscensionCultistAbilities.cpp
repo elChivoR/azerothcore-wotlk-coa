@@ -122,7 +122,6 @@ public:
                 {
                     uint32 stacks = marks->GetStackAmount();
                     float amount = Amount(301983, 0, player) + .35f * player->SpellBaseHealingBonusDone(SPELL_SCHOOL_MASK_SHADOW);
-                    // Native marker contributes 20% healing per owned stack; remove only after the heal.
                     Copy(player, ally, 301983, uint32(std::max(0.0f, amount)));
                     if (Aura* remaining = ally->GetAura(301982, player->GetGUID()); remaining && remaining->GetStackAmount() == stacks)
                         remaining->Remove();
@@ -331,6 +330,39 @@ class spell_ascension_cultist_resource : public SpellScript
         OnEffectHitTarget += SpellEffectFn(spell_ascension_cultist_resource::Effect, EFFECT_ALL, SPELL_EFFECT_ANY);
     }
 };
+class spell_ascension_cultist_sanity_tap : public SpellScript
+{
+    PrepareSpellScript(spell_ascension_cultist_sanity_tap);
+    void Effect(SpellEffIndex index)
+    {
+        PreventHitDefaultEffect(index);
+        Unit* caster = GetCaster();
+        Unit* target = GetHitUnit();
+        SpellInfo const* info = GetSpellInfo();
+        int32 misc = info->Effects[index].MiscValue;
+        if (!caster || !target || !target->IsAlive() || misc < 0 || misc >= int32(MAX_POWERS))
+            return;
+        if (target->HasUnitState(UNIT_STATE_ISOLATED))
+        {
+            caster->SendSpellDamageImmune(target, info->Id);
+            return;
+        }
+        Powers power = Powers(misc);
+        if (target->IsPlayer() && !target->CanReceivePowerFromSpell(power) &&
+            !info->HasAttribute(SPELL_ATTR7_ONLY_IN_SPELLBOOK_UNTIL_LEARNED))
+            return;
+        uint32 maxPower = target->GetMaxPower(power);
+        uint32 currentPower = target->GetPower(power);
+        if (currentPower >= maxPower)
+            return;
+        caster->EnergizeBySpell(target, info->Id, CalculatePct(maxPower - currentPower, GetEffectValue()), power);
+    }
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_ascension_cultist_sanity_tap::Effect, EFFECT_1,
+            SPELL_EFFECT_ENERGIZE_PCT);
+    }
+};
 class spell_ascension_cultist_ability : public SpellScript
 {
     PrepareSpellScript(spell_ascension_cultist_ability);
@@ -381,7 +413,7 @@ class spell_ascension_cultist_ability : public SpellScript
             }
         }
         if (id == 804779 && (effect.Effect == 174 || effect.Effect == 164))
-            PreventHitDefaultEffect(index); // The ritual's ten consenting channels, not a stale sacrifice helper.
+            PreventHitDefaultEffect(index);
     }
     void Launch(SpellEffIndex index)
     {
@@ -422,6 +454,7 @@ void AddSC_AscensionCultistAbilities()
 {
     new cultist_spells();
     RegisterSpellScript(spell_ascension_cultist_resource);
+    RegisterSpellScript(spell_ascension_cultist_sanity_tap);
     RegisterSpellScript(spell_ascension_cultist_ability);
     RegisterSpellScript(spell_ascension_cultist_shield);
 }

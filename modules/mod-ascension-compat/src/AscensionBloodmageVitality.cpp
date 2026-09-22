@@ -3,6 +3,7 @@
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "Spell.h"
+#include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellScript.h"
 #include <algorithm>
@@ -47,8 +48,6 @@ public:
 
     void OnSpellCheckCast(Spell* spell, bool, SpellCastResult& result) override
     {
-        // A cast prepared with an instant/free benefit cannot finish with stacks
-        // that expired or were spent by a different cast during its cast time.
         if (spell->GetScriptValue(PooledVitalityTalent) && !CanEmpower(spell->GetCaster()->ToPlayer()))
             result = SPELL_FAILED_CASTER_AURASTATE;
     }
@@ -86,7 +85,6 @@ public:
             spell->GetScriptValue(PooledVitalityTalent) != Mend || spell->GetScriptValue(MendSelfHeal))
             return;
         spell->SetScriptValue(MendSelfHeal, 1);
-        // Custom basepoints pass through native float arithmetic before returning to int32.
         uint32 maximum = uint32(std::nextafter(float(std::numeric_limits<int32>::max()), 0.0f));
         int32 amount = int32(std::min(healing / 2, maximum));
         if (amount)
@@ -113,6 +111,40 @@ public:
     }
 };
 
+void SetHealthPct(Unit* unit, float pct)
+{
+    uint32 maximum = unit->GetMaxHealth();
+    double health = double(maximum) * std::clamp(double(pct), 0.0, 100.0) / 100.0;
+    unit->SetHealth(std::min<uint32>(maximum, std::max<uint32>(1, uint32(health + 0.5))));
+}
+
+class spell_ascension_bloodmage_transfusion : public SpellScript
+{
+    PrepareSpellScript(spell_ascension_bloodmage_transfusion);
+
+    void Swap(SpellEffIndex index)
+    {
+        PreventHitDefaultEffect(index);
+        Unit* caster = GetCaster();
+        Unit* target = GetHitUnit();
+        if (!caster || !target || caster == target || !caster->IsAlive() || !target->IsAlive() ||
+            !caster->GetMaxHealth() || !target->GetMaxHealth())
+            return;
+        float casterPct = caster->GetHealthPct();
+        float targetPct = target->GetHealthPct();
+        float lower = std::min(casterPct, targetPct);
+        float raised = std::max(lower, float(GetEffectValue()));
+        SetHealthPct(caster, targetPct > lower ? targetPct : raised);
+        SetHealthPct(target, casterPct > lower ? casterPct : raised);
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_ascension_bloodmage_transfusion::Swap,
+            EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
 class spell_ascension_bloodmage_empowered : public SpellScript
 {
     PrepareSpellScript(spell_ascension_bloodmage_empowered);
@@ -133,8 +165,6 @@ class spell_ascension_bloodmage_empowered : public SpellScript
     {
         if (GetSpellInfo()->Effects[index].TriggerSpell != HeartbreakBuff)
             return;
-        // Native effect 142 otherwise grants the empowered buff unconditionally,
-        // and its old enemy selector gives the party buff the wrong anchor.
         PreventHitDefaultEffect(index);
         if (!Empowered(Heartbreak) || _heartbreak)
             return;
@@ -168,11 +198,81 @@ class spell_ascension_bloodmage_empowered : public SpellScript
         OnHit += SpellHitFn(spell_ascension_bloodmage_empowered::ModifyHit);
     }
 };
+constexpr uint32 EternalPresenceBuff = 560010;
+
+class aura_ascension_eternal_presence : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_eternal_presence);
+
+    bool Validate(SpellInfo const*) override { return ValidateSpellInfo({EternalPresenceBuff}); }
+
+    bool Check(ProcEventInfo& event)
+    {
+        Unit* target = GetTarget();
+        DamageInfo const* damage = event.GetDamageInfo();
+        return target->IsPlayer() && target->IsAlive() && target->IsInWorld() &&
+            event.GetActionTarget() == target && damage && damage->GetDamage();
+    }
+
+    void Proc(AuraEffect const* effect, ProcEventInfo& event)
+    {
+        PreventDefaultAction();
+        uint64 amount = uint64(event.GetDamageInfo()->GetDamage()) * std::clamp(effect->GetAmount(), 0, 100) / 100;
+        if (!amount)
+            return;
+        GetTarget()->CastCustomSpell(EternalPresenceBuff, SPELLVALUE_BASE_POINT0,
+            int32(std::min<uint64>(amount, std::numeric_limits<int32>::max())), GetTarget(), TRIGGERED_FULL_MASK);
+    }
+
+    void Register() override
+    {
+        DoCheckProc += AuraCheckProcFn(aura_ascension_eternal_presence::Check);
+        OnEffectProc += AuraEffectProcFn(aura_ascension_eternal_presence::Proc, EFFECT_2, AuraType(354));
+    }
+};
+
+constexpr uint32 EndureTheCurseHeal = 681189;
+
+class aura_ascension_endure_the_curse : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_endure_the_curse);
+    bool _healed = false;
+
+    bool Validate(SpellInfo const*) override { return ValidateSpellInfo({EndureTheCurseHeal}); }
+
+    void Amount(AuraEffect const*, int32& amount, bool& recalculate)
+    {
+        amount = -1;
+        recalculate = false;
+    }
+
+    void Absorb(AuraEffect*, DamageInfo& damage, uint32& absorb)
+    {
+        absorb = 0;
+        Unit* target = GetTarget();
+        if (_healed || !target->IsAlive() || !damage.GetDamage())
+            return;
+        if (uint64(target->GetHealth()) >= uint64(damage.GetDamage()) + target->CountPctFromMaxHealth(10))
+            return;
+        _healed = true;
+        target->CastSpell(target, EndureTheCurseHeal, true);
+    }
+
+    void Register() override
+    {
+        DoEffectCalcAmount += AuraEffectCalcAmountFn(aura_ascension_endure_the_curse::Amount,
+            EFFECT_0, SPELL_AURA_SCHOOL_ABSORB);
+        OnEffectAbsorb += AuraEffectAbsorbFn(aura_ascension_endure_the_curse::Absorb, EFFECT_0);
+    }
+};
 }
 
 void AddSC_AscensionBloodmageVitality()
 {
     new bloodmage_vitality_casts();
     new bloodmage_vitality_scaling();
+    RegisterSpellScript(spell_ascension_bloodmage_transfusion);
     RegisterSpellScript(spell_ascension_bloodmage_empowered);
+    RegisterSpellScript(aura_ascension_eternal_presence);
+    RegisterSpellScript(aura_ascension_endure_the_curse);
 }

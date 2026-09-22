@@ -24,7 +24,7 @@ namespace
 {
 std::unordered_map<ObjectGuid, std::unique_ptr<FelswornState>> states;
 std::mutex stateMutex;
-} // namespace
+}
 Player* Owner(Unit const* unit)
 {
     Player* player = unit ? const_cast<Unit*>(unit)->ToPlayer() : nullptr;
@@ -33,9 +33,6 @@ Player* Owner(Unit const* unit)
 FelswornState& State(Player* player)
 {
     std::lock_guard<std::mutex> lock(stateMutex);
-    // The map is locked for the lookup only: the caller then reads and writes the state with no
-    // lock held. Kept by pointer, the state itself never moves, so an insert for another player
-    // rehashing the map cannot leave that caller writing into freed memory.
     return *states.try_emplace(player->GetGUID(), std::make_unique<FelswornState>()).first->second;
 }
 bool Named(SpellInfo const* info, uint32 root)
@@ -124,7 +121,6 @@ bool Inner(Unit const* player)
 }
 bool Triggered(Spell const* spell)
 {
-    // SPELL_ATTR4_ALLOW_CAST_WHILE_CASTING adds these flags to direct player casts (Inner Demon among them).
     constexpr uint32 castWhileCasting = TRIGGERED_IGNORE_CAST_IN_PROGRESS | TRIGGERED_CAST_DIRECTLY;
     return spell->HasTriggeredCastFlag(TriggerCastFlags(TRIGGERED_FULL_MASK & ~castWhileCasting));
 }
@@ -266,6 +262,16 @@ void Refresh(Player* player)
         state.fury = 0;
     state.refreshing = false;
 }
+void RefreshUnphased(Player* player)
+{
+    AuraEffect* pushback = player->GetAuraEffect(Unphased, EFFECT_1);
+    if (!pushback)
+        return;
+    int32 const full = pushback->GetSpellInfo()->Effects[EFFECT_1].CalcValue(player);
+    pushback->SetCanBeRecalculated(false);
+    pushback->ChangeAmount(Inner(player) ? full : 0);
+}
+
 void SpreadCripple(Player* player, Unit* target)
 {
     Aura* source = target->GetAura(704371, player->GetGUID());
@@ -293,7 +299,7 @@ void SpreadCripple(Player* player, Unit* target)
         }
     }
 }
-} // namespace AscensionFelsworn
+}
 
 namespace
 {
@@ -301,8 +307,23 @@ class felsworn_player : public PlayerScript
 {
   public:
     felsworn_player()
-        : PlayerScript("felsworn_player", {PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT})
+        : PlayerScript("felsworn_player", {PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT,
+                                            PLAYERHOOK_ON_LEARN_SPELL, PLAYERHOOK_ON_LOGIN})
     {
+    }
+    void OnPlayerLearnSpell(Player* player, uint32 spellId) override
+    {
+        using namespace AscensionFelsworn;
+        if (spellId != Unphased || !Owner(player))
+            return;
+        RefreshUnphased(player);
+    }
+    void OnPlayerLogin(Player* player) override
+    {
+        using namespace AscensionFelsworn;
+        if (!Owner(player))
+            return;
+        RefreshUnphased(player);
     }
     void OnPlayerUpdate(Player* player, uint32 diff) override
     {
@@ -350,7 +371,7 @@ class felsworn_player : public PlayerScript
     void OnPlayerBeforeLogout(Player* player) override
     {
         if (AscensionFelsworn::Owner(player))
-            AscensionFelsworn::SettleDebt(player); // before native SaveToDB, so logout cannot erase deferred damage
+            AscensionFelsworn::SettleDebt(player);
     }
     void OnPlayerLogout(Player* player) override
     {
@@ -364,7 +385,7 @@ class felsworn_player : public PlayerScript
         states.erase(player->GetGUID());
     }
 };
-} // namespace
+}
 void AddSC_AscensionFelsworn()
 {
     new felsworn_player();

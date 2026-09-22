@@ -6,6 +6,7 @@
 #include "DBCStores.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
+#include "Log.h"
 #include "Pet.h"
 #include "Player.h"
 #include "ScriptMgr.h"
@@ -77,12 +78,25 @@ void ClearReplacement(Player* player, uint32 word, uint32 mask)
             player->SetTemporarySpellReplacement(id, 0);
 }
 
+void ConvertCreatureTypeDamage(SpellInfo* info, uint8 index)
+{
+    SpellEffectInfo& effect = info->Effects[index];
+    if (effect.Effect != SPELL_EFFECT_APPLY_AURA || effect.ApplyAuraName != SPELL_AURA_OVERRIDE_CLASS_SCRIPTS ||
+        effect.MiscValue != ASCENSION_CLASSMASK_CREATURE_DAMAGE || effect.MiscValueB <= 0 || !effect.SpellClassMask)
+    {
+        LOG_ERROR("module.ascension_compat", "Skipped unexpected Witch Hunter creature damage record {}", info->Id);
+        return;
+    }
+    effect.ApplyAuraName = SPELL_AURA_MOD_DAMAGE_DONE_VERSUS;
+    std::swap(effect.MiscValue, effect.MiscValueB);
+}
+
 void ApplyContracts(SpellInfo* info)
 {
     if (!info || info->SpellFamilyName != 21)
         return;
     uint32 id = info->Id;
-    if (Family(info, 1, 4194304)) // Witchbane and its ranks.
+    if (Family(info, 1, 4194304))
     {
         info->InterruptFlags |= SPELL_INTERRUPT_FLAG_MOVEMENT;
         info->ChannelInterruptFlags |= AURA_INTERRUPT_FLAG_MOVE;
@@ -93,6 +107,12 @@ void ApplyContracts(SpellInfo* info)
     // the tooltip from its own record and reads "Instant"; the cast bar follows MSG_CHANNEL_START.
     if (Family(info, 0, 2) && info->HasAura(SPELL_AURA_PERIODIC_TRIGGER_SPELL_WITH_VALUE))
         info->AttributesEx |= SPELL_ATTR1_IS_CHANNELED;
+    if (id == 574149 || id == 574163)
+        ConvertCreatureTypeDamage(info, EFFECT_1);
+    if (id == 804026)
+        ConvertCreatureTypeDamage(info, EFFECT_0);
+    if (id == 804194 && info->Effects[EFFECT_1].ApplyAuraName == SPELL_AURA_MOD_ARMOR_PENETRATION_PCT)
+        info->Effects[EFFECT_1].ApplyAuraName = SPELL_AURA_ASCENSION_MOD_IGNORE_ARMOR_PCT;
     if (id == 707535)
     {
         info->Effects[EFFECT_0].ApplyAuraName = SPELL_AURA_MOD_SPELL_DAMAGE_OF_STAT_PERCENT;
@@ -108,20 +128,12 @@ void ApplyContracts(SpellInfo* info)
         info->AttributesEx3 &= ~SPELL_ATTR3_REQUIRES_OFF_HAND_WEAPON;
     if (Heartseeking(info))
         info->Effects[EFFECT_2].TriggerSpell = 807316;
-    // Quickdraw hands its Rage to Darkslayer (Energize) 680235 through a DUMMY effect, which is
-    // scripted-only and never runs. Its sibling Darkslayer authors the identical payload as a trigger
-    // effect. Record and text conflict here: Darkslayer's and Sixfold Shot's descriptions name the Rage
-    // income, Quickdraw's omits it. The income is taken as authored because Sixfold Shot, the upgrade
-    // that replaces this same family mask, advertises and receives one, and because the ability was
-    // reported in game as spending Rage without ever paying any back. The amount is 680235's own
-    // authored 100-250 internal (10-25 Rage) and has not been observed live.
     if (Quickdraw(info) && info->Effects[EFFECT_2].TriggerSpell == 680235)
         info->Effects[EFFECT_2].Effect = SPELL_EFFECT_TRIGGER_SPELL;
     if (id == 503662)
         info->CasterAuraSpell = 0;
     if (id == 300872)
-        info->Effects[EFFECT_1].Effect = 0; // aura 192 already affects both weapon speeds
-    // Slayer keeps native raid crit (effect 0) separate from its personal bonus (effect 1).
+        info->Effects[EFFECT_1].Effect = 0;
     if (id == 524854 || id == 680505)
         info->Effects[id == 524854 ? EFFECT_2 : EFFECT_0].ApplyAuraName = SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN;
     if (id == 504478 || id == 500569)
@@ -147,16 +159,16 @@ void ApplyContracts(SpellInfo* info)
     if (id == 680498)
         info->Effects[EFFECT_1].ApplyAuraName = SPELL_AURA_DUMMY;
     if (id == 680519)
-        info->Effects[EFFECT_0].Effect = 0; // per-brand healing is separate from the once-per-cast flat heal
+        info->Effects[EFFECT_0].Effect = 0;
     if (id == 805347)
-        info->Effects[EFFECT_2].Effect = 0; // the cast-deduplicated handler reduces every Tonic rank
+        info->Effects[EFFECT_2].Effect = 0;
     if (id == 520271)
-        info->Effects[EFFECT_1].Effect = 0; // missing private visual 500565 is not the damage payload
+        info->Effects[EFFECT_1].Effect = 0;
     if (id == 681098)
         info->Effects[EFFECT_0].ApplyAuraName = SPELL_AURA_DUMMY;
     if (id == 524669)
     {
-        info->StackAmount = 1; // one explicit sum of the last three contributions
+        info->StackAmount = 1;
         info->Effects[EFFECT_1].Effect = 0;
     }
     if (id == 681392 || id == 681489)
@@ -168,11 +180,11 @@ void ApplyContracts(SpellInfo* info)
         info->AttributesEx3 |= SPELL_ATTR3_REQUIRES_OFF_HAND_WEAPON;
     }
     if (id == 681415 || id == 681524)
-        info->Effects[EFFECT_1].Effect = 0; // the hit script owns both stack consumptions
+        info->Effects[EFFECT_1].Effect = 0;
     if (id == 681524)
         info->SchoolMask = 33;
     if (id == 681270)
-        info->Effects[EFFECT_1].Effect = 0; // the same resolved amount feeds the explicit mana return
+        info->Effects[EFFECT_1].Effect = 0;
     if (id == 573266 || id == 800528)
         for (SpellEffectInfo& effect : info->Effects)
             if (effect.IsAura())
@@ -185,7 +197,7 @@ void ApplyContracts(SpellInfo* info)
     if (id == 574335 || id == 574337)
         info->Effects[EFFECT_0].TargetA = SpellImplicitTargetInfo(TARGET_UNIT_TARGET_ALLY);
     if (id == 706332)
-        info->Effects[EFFECT_0].Effect = 0; // AI owns the leap and its two landing hits
+        info->Effects[EFFECT_0].Effect = 0;
     if (id == 805770)
     {
         info->Effects[EFFECT_0].ApplyAuraName = SPELL_AURA_DUMMY;
@@ -209,7 +221,6 @@ void ApplyContracts(SpellInfo* info)
         info->Effects[EFFECT_0].ApplyAuraName = SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN;
     if (id == 501380)
     {
-        // This damage-breakable incapacitate shares the native disorient DR group.
         info->Mechanic = MECHANIC_KNOCKOUT;
         info->Effects[EFFECT_0].Effect = SPELL_EFFECT_APPLY_AURA;
         info->Effects[EFFECT_0].ApplyAuraName = SPELL_AURA_MOD_CONFUSE;
@@ -257,7 +268,7 @@ void ApplyContracts(SpellInfo* info)
                 effect.TargetB = SpellImplicitTargetInfo();
             }
     if (id == 520865)
-        info->Effects[EFFECT_1].Effect = 0; // authored 504854 visual replaces the absent gameobject
+        info->Effects[EFFECT_1].Effect = 0;
     if (id == 805756)
     {
         info->Effects[EFFECT_1].ApplyAuraName = SPELL_AURA_DUMMY;
@@ -267,7 +278,7 @@ void ApplyContracts(SpellInfo* info)
         info->Effects[EFFECT_0].TargetA = SpellImplicitTargetInfo(TARGET_UNIT_DEST_AREA_ALLY);
     if (id == 500102)
         info->Effects[EFFECT_1].Effect = 0;
-    if (id == 520670 || id == 504713)
+    if (id == 504713)
         info->ProcCharges = 0;
     if (id == 504790)
     {
@@ -275,7 +286,7 @@ void ApplyContracts(SpellInfo* info)
         info->Effects[EFFECT_2].MiscValue = 127;
     }
     if (id == 681327 || id == 680237 || id == 680539 || id == 681390 || id == 500161 || id == 500566)
-        info->ProcCharges = 0; // selected successful casts consume these explicitly
+        info->ProcCharges = 0;
     for (WitchCoefficient const& coefficient : WitchCoefficients)
         if (coefficient.id == id)
             info->Effects[coefficient.effect].BonusMultiplier = 0.0f;
@@ -292,8 +303,6 @@ void ApplyContracts(SpellInfo* info)
     }
     if (id == 807198)
         info->Effects[EFFECT_1].Effect = 0;
-    if (id == 807231)
-        info->Effects[EFFECT_0].Effect = 0;
     if (id == 804185)
         for (SpellEffectInfo& effect : info->Effects)
             if (effect.IsAura())
@@ -307,22 +316,17 @@ void ApplyContracts(SpellInfo* info)
         for (SpellEffectInfo& effect : info->Effects)
             if (effect.IsAura(SPELL_AURA_PROC_TRIGGER_SPELL))
                 effect.ApplyAuraName = SPELL_AURA_DUMMY;
-    // The following events run on successful casts, not once per victim or channel tick.
     for (uint32 talent : {705455, 500101, 681100, 705490, 524812, 500055, 681156, 680513, 582310, 504645, 500567,
                           705450, 706365, 707891, 503669, 705463, 705480})
         if (id == talent)
             info->ProcFlags = 0;
 }
-} // namespace AscensionWitchHunter
+}
 
 namespace
 {
 using namespace AscensionWitchHunter;
 
-// The Witch Hunter spends Rage - 216 of its family-21 records carry a Rage cost - but ChrClasses.dbc
-// gives class 15 Mana as its display power. Unit::DealDamage grants Rage for melee damage dealt and
-// for damage received only when HasActivePowerType(POWER_RAGE) is true, which asks the scripts first
-// and otherwise compares the display power, so the class gained Rage from its own abilities alone.
 class witch_hunter_resources : public PlayerScript
 {
   public:
@@ -365,7 +369,6 @@ class witch_hunter_scaling : public UnitScript
     }
 };
 
-// Copies of resolved damage must not gain a second crit, SP coefficient or taken modifier.
 class spell_ascension_witch_hunter_copy : public SpellScript
 {
     PrepareSpellScript(spell_ascension_witch_hunter_copy);
@@ -384,7 +387,7 @@ class spell_ascension_witch_hunter_copy : public SpellScript
         OnEffectHitTarget += SpellEffectFn(spell_ascension_witch_hunter_copy::Hit, EFFECT_ALL, SPELL_EFFECT_ANY);
     }
 };
-} // namespace
+}
 
 void AddAscensionWitchHunterCompletionScripts()
 {

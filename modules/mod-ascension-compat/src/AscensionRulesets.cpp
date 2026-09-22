@@ -14,24 +14,30 @@ enum RulesetSpells : uint32
     SPELL_SELECT_PVE = 84422,
     SPELL_HIGH_RISK = 1004019,
     SPELL_WAR_MODE = 1004119,
-    SPELL_PVE = 9931032
+    SPELL_PVE = 9931032,
+    SPELL_MERCENARY = 9930874
 };
 
-// Applies the aura set a selection spell stands for, without running its cast requirements.
+uint32 RulesetAura(uint32 selectionId)
+{
+    switch (selectionId)
+    {
+        case SPELL_SELECT_HIGH_RISK:
+            return SPELL_HIGH_RISK;
+        case SPELL_SELECT_PVE:
+            return SPELL_PVE;
+        default:
+            return SPELL_WAR_MODE;
+    }
+}
+
 void ApplyRuleset(Player* player, uint32 selectionId)
 {
     player->RemoveAurasDueToSpell(SPELL_HIGH_RISK);
     player->RemoveAurasDueToSpell(SPELL_WAR_MODE);
     player->RemoveAurasDueToSpell(SPELL_PVE);
-    if (selectionId == SPELL_SELECT_HIGH_RISK)
-        player->CastSpell(player, SPELL_HIGH_RISK, true);
-    else
-    {
-        // C_Player:GetRuleset distinguishes PvE by this additional marker.
-        player->CastSpell(player, SPELL_WAR_MODE, true);
-        if (selectionId == SPELL_SELECT_PVE)
-            player->CastSpell(player, SPELL_PVE, true);
-    }
+    player->RemoveAurasDueToSpell(SPELL_MERCENARY);
+    player->CastSpell(player, RulesetAura(selectionId), true);
 }
 
 class spell_ascension_ruleset_select : public SpellScript
@@ -47,7 +53,6 @@ class spell_ascension_ruleset_select : public SpellScript
 
     SpellCastResult CheckCast()
     {
-        // The selection spell descriptions require a rested area, including inns.
         Player* player = GetCaster()->ToPlayer();
         return player && player->HasPlayerFlag(PLAYER_FLAGS_RESTING) ? SPELL_CAST_OK : SPELL_FAILED_NOT_HERE;
     }
@@ -88,28 +93,24 @@ public:
 
     void OnPlayerLogin(Player* player) override
     {
-        // CastSpellByID still requires these UI actions to be known on the server.
         for (uint32 id : {SPELL_SELECT_WAR_MODE, SPELL_SELECT_HIGH_RISK, SPELL_SELECT_PVE})
             if (!player->HasSpell(id))
                 player->learnSpell(id, false);
 
-        // Character creation grants no ruleset, and the client's selection frame is level and
-        // rested-area gated, so a character without one can never leave C_Player.Ruleset.None
-        // on its own. Default to the only harmless ruleset until the player picks another.
-        // The PvE set is 1004119 + 9931032, so it carries the War Mode name, description and
-        // SPELL_AURA_MOD_XP_PCT 15 that any explicit PvE selection already applies; a realm that does not
-        // want that applied without a player action can turn the default off here.
         if (!sConfigMgr->GetOption<bool>("AscensionCompat.RulesetLoginDefault", true))
             return;
 
-        // A character evicted from an instance at login is already out of the world, mid far-teleport:
-        // CharacterHandler guards its own login-time cast with the same test for that reason. Leave the
-        // default to the next login instead of casting at a unit the client is unloading.
         if (!player->IsInWorld())
             return;
 
         if (!player->HasAura(SPELL_HIGH_RISK) && !player->HasAura(SPELL_WAR_MODE) && !player->HasAura(SPELL_PVE))
+        {
             ApplyRuleset(player, SPELL_SELECT_PVE);
+            return;
+        }
+
+        if (player->HasAura(SPELL_PVE))
+            player->RemoveAurasDueToSpell(SPELL_WAR_MODE);
     }
 };
 }

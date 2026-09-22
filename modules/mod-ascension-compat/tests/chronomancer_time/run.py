@@ -1,4 +1,3 @@
-"""Check actual Chronomancer callbacks against copied DBC and native rank data."""
 import argparse
 import os
 from pathlib import Path
@@ -18,7 +17,6 @@ SQL = ROOT / 'data/sql/updates/pending_db_world/rev_1789370063248101100.sql'
 def check_summons(rows):
     sql = SQL.read_text()
     db = sqlite3.connect(':memory:')
-    # Only the columns touched by this migration are needed for preservation and replay checks.
     schemas = {}
     for table, columns in re.findall(r'INSERT INTO `(\w+)`\s*\((.*?)\)', sql, re.S):
         schemas.setdefault(table, set()).update(re.findall(r'`(\w+)`', columns))
@@ -45,12 +43,11 @@ def check_summons(rows):
     assert db.execute('SELECT type,data0,data1,data6,data7 FROM gameobject_template WHERE entry=194109').fetchone() == (
         18, 2, 1200007, 1, 1)
     assert db.execute('SELECT type,data0 FROM gameobject_template WHERE entry=194112').fetchone() == (23, 1)
-    assert 23598 in spells  # Native meeting-stone summon used by the completed hourglass.
+    assert 23598 in spells
     assert db.execute('SELECT ProcFlags,SpellTypeMask,SpellPhaseMask,Chance,Cooldown FROM spell_proc').fetchone() == (
         262144, 3, 2, 100, 0)
     bonuses = db.execute('SELECT direct_bonus,dot_bonus,ap_bonus,ap_dot_bonus FROM spell_bonus_data')
     assert set(bonuses) == {(0, 0, 0, 0)}
-    # Guarded template inserts must preserve an installation's existing content, including custom appearance.
     db.execute("UPDATE creature_template SET name='existing clone' WHERE entry=50071")
     db.execute('UPDATE creature_template_model SET CreatureDisplayID=123 WHERE CreatureID=50071')
     db.execute("UPDATE gameobject_template SET name='existing object'")
@@ -80,26 +77,28 @@ def main():
     archive = zipfile.ZipFile(ROOT / 'data/coa-world/coa-world-20260912.zip')
     rank_sql = archive.read(next(p for p in archive.namelist() if p.rsplit('/', 1)[-1] == 'spell_ranks.sql')).decode()
     ranks = [tuple(map(int, row)) for row in re.findall(r'\((\d+),(\d+),(\d+)\)', rank_sql)]
-    ranks = [row for row in ranks if row[0] in (801270, 800857, 804491, 572633)]
+    ranks = [row for row in ranks if row[0] in (801270, 800857, 804491, 572633, 572352)]
     ids.update(row[1] for row in ranks)
     init = ['void InitData(){']
     for sid in sorted(ids):
         r = spells[sid]
         duration = signed(durations[r[40]][1]) if r[40] else 0
-        init.append(f'{{auto& s=manager.infos[{sid}];s.Id={sid};s.duration={duration};'
-                    f's.StackAmount={r[49]};s.MaxAffectedTargets={r[212]};'
+        init.append(f'{{auto& s=manager.infos[{sid}];s.Id={sid};s.duration={duration};s.SpellFamilyName={r[208]};'
+                    f's.StackAmount={r[49]};s.MaxAffectedTargets={r[212]};s.AttributesEx4={r[8]};'
                     f's.flags={{{r[209]},{r[210]},{r[211]}}};')
         for i in range(3):
+            scaling = struct.unpack('<f', struct.pack('<I', r[77+i]))[0]
+            bonus = struct.unpack('<f', struct.pack('<I', r[229+i]))[0]
             radius = struct.unpack('<f', struct.pack('<I', radii[r[92+i]][1]))[0] if r[92+i] else 0
             init.append(f'{{auto& e=s.Effects[{i}];e.Effect={r[71+i]};e.ApplyAuraName={r[95+i]};'
                         f'e.BasePoints={signed(r[80+i])};e.DieSides={signed(r[74+i])};'
+                        f'e.RealPointsPerLevel={scaling}f;e.BonusMultiplier={bonus}f;'
                         f'e.Amplitude={r[98+i]};e.MiscValue={signed(r[110+i])};e.radius={float(radius)}f;'
                         f'e.mask={{{r[122+i*3]},{r[123+i*3]},{r[124+i*3]}}};}}')
         init.append('}')
     init.extend(f'manager.roots[{sid}]={root};manager.infos[{sid}].rank={rank};' for root, sid, rank in ranks)
     init.append('}')
     code = (HERE / 'harness.cpp').read_text() + re.sub(r'^#include.*\n', '', source, flags=re.M)
-    # Exercise the native percentage tick calculation selected by the metadata correction.
     extract = runpy.run_path(str(HERE.parent / 'client_compat/run.py'))['method']
     native = extract((ROOT / 'src/server/game/Spells/Auras/SpellAuraEffects.cpp').read_text(),
                      'void AuraEffect::HandleObsModPowerAuraTick(')

@@ -39,10 +39,44 @@ Player* Owner(Unit const* unit)
 TinkerState& State(Player* player)
 {
     std::lock_guard<std::mutex> lock(stateMutex);
-    // The map is locked for the lookup only: the caller then reads and writes the state with no
-    // lock held. Kept by pointer, the state itself never moves, so an insert for another player
-    // rehashing the map cannot leave that caller writing into freed memory.
     return *states.try_emplace(player->GetGUID(), std::make_unique<TinkerState>()).first->second;
+}
+bool NotifyAttack(Player* player, Unit* target)
+{
+    if (!player || !target || !player->IsValidAttackTarget(target))
+        return false;
+    State(player).focus = target->GetGUID();
+    return true;
+}
+bool NotifySpellAttack(Player* player, SpellInfo const* spellInfo, Unit* target)
+{
+    if (!spellInfo || spellInfo->SpellFamilyName != 34 || spellInfo->IsPositive() || !NotifyAttack(player,target))
+        return false;
+    Unit* victim = player->GetVictim();
+    State(player).observedVictim = victim ? victim->GetGUID() : ObjectGuid();
+    return true;
+}
+void ObserveAttack(Player* player)
+{
+    if (!player)
+        return;
+    auto& state = State(player);
+    Unit* victim = player->GetVictim();
+    ObjectGuid victimGuid = victim ? victim->GetGUID() : ObjectGuid();
+    if (victimGuid != state.observedVictim)
+    {
+        state.observedVictim = victimGuid;
+        NotifyAttack(player,victim);
+    }
+    Spell* autoRepeat = player->GetCurrentSpell(CURRENT_AUTOREPEAT_SPELL);
+    Unit* rangedTarget = autoRepeat && autoRepeat->GetSpellInfo()->IsAutoRepeatRangedSpell() ?
+        autoRepeat->m_targets.GetUnitTarget() : nullptr;
+    ObjectGuid rangedGuid = rangedTarget ? rangedTarget->GetGUID() : ObjectGuid();
+    if (rangedGuid != state.observedAutoRepeatTarget)
+    {
+        state.observedAutoRepeatTarget = rangedGuid;
+        NotifyAttack(player,rangedTarget);
+    }
 }
 bool Named(SpellInfo const* info, uint32 root)
 {
@@ -291,9 +325,6 @@ void Refresh(Player* player)
     bool mine = false;
     for (Creature* device : Devices(player))
         mine |= device->GetEntry() == 50045 || device->GetEntry() == 50600;
-    // Bomb Ready (500354) is an owner area aura the mine itself carries, see
-    // npc_ascension_tinker_device::IsSummonedBy. Casting it from the Tinker can never apply it - the
-    // area aura only reaches the aura owner's own owner - and revoking it here would strip the mine's.
     if (mine && !player->HasSpell(801798))
         player->learnSpell(801798,true);
     else if (!mine)
@@ -301,7 +332,7 @@ void Refresh(Player* player)
     bool gear = player->HasAura(681245);
     if (Spell* channel = player->GetCurrentSpell(CURRENT_CHANNELED_SPELL); channel &&
         channel->GetSpellInfo()->Id == 504594 && channel->getState() != SPELL_STATE_FINISHED)
-        gear = true; // Unlearning now would remove the channel aura before its four ticks finish.
+        gear = true;
     for (auto [root,replacement,enabled] : {std::tuple(500549u,500213u,mech),
         std::tuple(504527u,504594u,gear)})
     {
@@ -319,7 +350,7 @@ void Refresh(Player* player)
         player->RemoveAurasDueToSpell(653282);
     state.refreshing = false;
 }
-} // namespace AscensionTinker
+}
 namespace
 {
 class tinker_player : public PlayerScript
@@ -329,6 +360,8 @@ public:
     void OnPlayerUpdate(Player* player, uint32 diff) override
     {
         using namespace AscensionTinker;
+        if (Owner(player) == player)
+            ObserveAttack(player);
         auto& state = State(player);
         state.timers.Update(diff);
         while (state.timers.ExecuteEvent()) { }

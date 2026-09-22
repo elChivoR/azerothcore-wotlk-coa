@@ -22,7 +22,7 @@ bool Periodic(ProcEventInfo const& event)
 {
     SpellInfo const* info = event.GetSpellInfo();
     return (event.GetTypeMask() & (PROC_FLAG_DONE_PERIODIC | PROC_FLAG_TAKEN_PERIODIC)) ||
-           (info && info->Id == PuppetHit); // damage forwarded by Master of Puppets' periodic aura
+           (info && info->Id == PuppetHit);
 }
 bool Derived(SpellInfo const* info)
 {
@@ -89,7 +89,7 @@ class aura_ascension_witch_doctor_event : public AuraScript
             case Hexplosion:
                 return damage && critical;
             case UmbralTalent:
-                return damage &&
+                return damage && (!info || info->Id != Umbral) &&
                        (event.GetTypeMask() &
                         (PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS)) &&
                        roll_chance_f(GetSpellInfo()->ProcChance + player->GetRatingBonusValue(CR_CRIT_RANGED));
@@ -199,7 +199,6 @@ class aura_ascension_witch_doctor_event : public AuraScript
             case PotionThistle:
             case SplashThistle:
             {
-                // The recipient supplies the damage; combat credit stays with the Witch Doctor.
                 Unit* caster = GetCaster();
                 Copy(caster ? caster : owner, owner, ThistleHeal,
                      uint64(damage) * std::max(0, GetEffect(EFFECT_0)->GetAmount()) / 100);
@@ -241,7 +240,7 @@ class aura_ascension_witch_doctor_event : public AuraScript
         OnProc += AuraProcFn(aura_ascension_witch_doctor_event::Proc);
     }
 };
-} // namespace
+}
 void AddAscensionWitchDoctorEventScripts()
 {
     RegisterSpellScript(aura_ascension_witch_doctor_event);

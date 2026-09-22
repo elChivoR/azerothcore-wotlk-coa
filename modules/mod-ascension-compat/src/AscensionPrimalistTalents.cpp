@@ -9,6 +9,8 @@
 #include "SpellMgr.h"
 #include "SpellScript.h"
 
+#include <algorithm>
+
 namespace
 {
 enum PrimalistAbilitySpells : uint32
@@ -35,8 +37,6 @@ public:
         if (!player || !player->IsAlive() || !damage || damage < player->GetHealth() ||
             !player->HasAura(560157) || player->HasSpellCooldown(560157))
             return;
-        // DealDamage reaches this hook after mitigation and absorption. Mark the
-        // native saved cooldown before casting the heal, including any nested events.
         player->AddSpellCooldown(560157, 0, 120000);
         damage = 0;
         player->CastSpell(player, 560179, true);
@@ -51,9 +51,42 @@ public:
         Aura* aura = application->GetBase();
         if (aura->GetCasterGUID() != player->GetGUID())
             return;
-        // Only the visible defenses, not their separately removed SLS helpers.
         if (aura->GetId() == 680421 || aura->GetId() == 800094 || aura->GetId() == 503630)
             player->CastSpell(player, 503716, true);
+    }
+};
+
+class aura_ascension_natural_efficiency : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_natural_efficiency);
+
+    bool Validate(SpellInfo const*) override { return ValidateSpellInfo({707806}); }
+    bool Load() override { return Primalist(GetUnitOwner()) != nullptr; }
+
+    bool Check(ProcEventInfo& event)
+    {
+        Unit* caster = event.GetActor();
+        SpellInfo const* info = event.GetSpellInfo();
+        if (!caster || caster == GetTarget() || !info || !GetTarget()->IsAlive() ||
+            !(event.GetHitMask() & (PROC_HIT_NORMAL | PROC_HIT_CRITICAL)))
+            return false;
+        AuraApplication const* application = GetTarget()->GetAuraApplication(info->Id, caster->GetGUID());
+        if (!application || application->GetRemoveMode() || application->IsPositive())
+            return false;
+        Aura* aura = application->GetBase();
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+            if (application->GetEffectMask() & (1 << i))
+                if (AuraEffect const* effect = aura->GetEffect(i))
+                    if (effect->GetAuraType() == SPELL_AURA_MOD_ROOT ||
+                        effect->GetAuraType() == SPELL_AURA_MOD_STUN ||
+                        effect->GetAuraType() == SPELL_AURA_MOD_CONFUSE)
+                        return true;
+        return false;
+    }
+
+    void Register() override
+    {
+        DoCheckProc += AuraCheckProcFn(aura_ascension_natural_efficiency::Check);
     }
 };
 
@@ -71,8 +104,6 @@ public:
             info->SpellFamilyName != 37 || info->Id != SPELL_GEODE_BARRAGE_DAMAGE ||
             spell->GetScriptValue(SPELL_GEODE_BARRAGE_RAGE))
             return;
-        // Each channel tick casts this damage helper. Its authored energize
-        // companion rolls 30-80 internal Rage (3-8 visible Rage) per successful stone.
         spell->SetScriptValue(SPELL_GEODE_BARRAGE_RAGE, 1);
         player->CastSpell(player, SPELL_GEODE_BARRAGE_RAGE, true);
     }
@@ -125,7 +156,7 @@ class spell_ascension_throat_clamp : public SpellScript
         Player* player = Primalist(GetCaster());
         Unit* target = GetHitUnit();
         if (CheckThroatClamp(player, target) == SPELL_CAST_OK)
-            player->GetPet()->CastSpell(target, 500811, false); // Native dash, interrupt and school lockout.
+            player->GetPet()->CastSpell(target, 500811, false);
     }
 
     void Register() override
@@ -134,11 +165,62 @@ class spell_ascension_throat_clamp : public SpellScript
         OnEffectHitTarget += SpellEffectFn(spell_ascension_throat_clamp::Handle, EFFECT_0, SPELL_EFFECT_DUMMY);
     }
 };
+
+class aura_ascension_earthmaker : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_earthmaker);
+
+    bool Check(ProcEventInfo& event)
+    {
+        Player* owner = Primalist(GetTarget());
+        DamageInfo const* damage = event.GetDamageInfo();
+        return owner && owner->IsAlive() && event.GetActor() == owner && damage && damage->GetDamage() &&
+            event.GetActionTarget() && !owner->IsFriendlyTo(event.GetActionTarget());
+    }
+
+    void Register() override
+    {
+        DoCheckProc += AuraCheckProcFn(aura_ascension_earthmaker::Check);
+    }
+};
+
+class aura_ascension_primal_shred_critical : public AuraScript
+{
+    PrepareAuraScript(aura_ascension_primal_shred_critical);
+
+    bool Load() override
+    {
+        Pet* pet = GetCaster() ? GetCaster()->ToPet() : nullptr;
+        return pet && Primalist(pet->GetOwner()) && GetSpellInfo()->SpellFamilyName == 37 &&
+            GetSpellInfo()->SpellFamilyFlags == flag96(0, 0, 32) &&
+            GetSpellInfo()->DmgClass == SPELL_DAMAGE_CLASS_MELEE;
+    }
+
+    void Snapshot(AuraEffect const*, AuraEffectHandleModes)
+    {
+        Unit* pet = GetCaster();
+        if (!pet)
+            return;
+        SpellInfo const* info = GetSpellInfo();
+        float chance = pet->SpellDoneCritChance(GetTarget(), info, info->GetSchoolMask(), BASE_ATTACK, true);
+        chance = GetTarget()->SpellTakenCritChance(pet, info, info->GetSchoolMask(), chance, BASE_ATTACK, true);
+        GetEffect(EFFECT_0)->SetCritChance(std::max(0.0f, chance));
+    }
+
+    void Register() override
+    {
+        AfterEffectApply += AuraEffectApplyFn(aura_ascension_primal_shred_critical::Snapshot,
+            EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE, AURA_EFFECT_HANDLE_REAL_OR_REAPPLY_MASK);
+    }
+};
 }
 
 void AddSC_AscensionPrimalistTalents()
 {
     new primalist_talent_events();
     new primalist_talent_casts();
+    RegisterSpellScript(aura_ascension_natural_efficiency);
     RegisterSpellScript(spell_ascension_throat_clamp);
+    RegisterSpellScript(aura_ascension_primal_shred_critical);
+    RegisterSpellScript(aura_ascension_earthmaker);
 }

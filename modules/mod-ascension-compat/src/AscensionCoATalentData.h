@@ -1,4 +1,3 @@
-// CoA talent catalog: the custom classes' CharacterAdvancement.dbc nodes, loaded at startup.
 #ifndef ASCENSION_COA_TALENT_DATA_H
 #define ASCENSION_COA_TALENT_DATA_H
 
@@ -32,14 +31,21 @@ struct CoAAutomaticDependency
     std::array<std::uint32_t, 2> RequiredEntryIds;
 };
 
-// Sorted by EntryId.
+struct CoATalentBudget
+{
+    std::uint8_t ClassId;
+    std::uint8_t Level;
+    std::uint8_t AE;
+    std::uint8_t TE;
+};
+
 extern std::vector<CoATalentEntry> CoATalentEntries;
 extern std::vector<CoASelectableFreeEntry> CoASelectableFreeEntries;
-// Sorted by EntryId.
 extern std::vector<CoAAutomaticDependency> CoAAutomaticDependencies;
+extern std::vector<CoATalentBudget> CoATalentBudgets;
 
-// Reads CharacterAdvancement.dbc with its class type, tab type, ChrClasses and ChrSpecs tables.
-// Returns false and leaves the catalog empty when a table cannot be read.
+bool GetCoATalentBudget(std::uint8_t classId, std::uint8_t level, std::uint32_t& ae, std::uint32_t& te);
+
 bool LoadCoATalentData();
 }
 

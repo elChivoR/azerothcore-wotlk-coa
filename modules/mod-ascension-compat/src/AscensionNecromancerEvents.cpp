@@ -86,12 +86,10 @@ class aura_ascension_necromancer_event : public AuraScript
         {
             if (actor->HasAura(680388, player->GetGUID()))
                 LeechArmy(player, damage);
-            // Vampiric Aura: only the minions' damage, and only while the Necromancer is below 50% health.
             if (minion && player->HealthBelowPct(50) && actor->HasAura(560607, player->GetGUID()))
                 Copy(player, player, 561095, uint64(damage) * std::max(0, Amount(560607, 1)) / 100);
             if (actor->HasAura(800027, player->GetGUID()))
                 Copy(actor, target, 570050, uint64(damage) * std::max(0, Amount(800027)) / 100);
-            // Ghoul Passive Healing's proc is routed here: each Ghoul auto attack heals its master.
             if (minion && melee && actor->HasAura(805290, player->GetGUID()))
                 Cast(actor, player, 707000);
         }
@@ -167,7 +165,7 @@ class aura_ascension_necromancer_event : public AuraScript
                     cost = std::max<uint8>(1, row.cost);
             if (Chance(player, 531128, cost))
                 Cast(player, player, 531129);
-            if (player->HasAura(560798))
+            if (actor->HasAura(560798, player->GetGUID()))
                 Reduce(player, 801938, std::abs(Amount(806322)));
             if (actor->GetEntry() == 50073 && Chance(player, 503740))
                 Cast(player, actor, 707014);
@@ -248,7 +246,7 @@ class necromancer_defense : public UnitScript
                     Cast(player, player, 500729);
                 }
     }
-    bool CanUnitAttack(Unit const* attacker, Unit const* /*target*/, SpellInfo const* /*spell*/) override
+    bool CanUnitAttack(Unit const* attacker, Unit const*, SpellInfo const*) override
     {
         Player* player = Owner(attacker);
         if (!player)
@@ -256,7 +254,7 @@ class necromancer_defense : public UnitScript
         return attacker == player ? !player->HasAura(500730) : !IsMinion(player, attacker) || !player->HasAura(500983);
     }
 };
-} // namespace
+}
 void AddAscensionNecromancerEventScripts()
 {
     RegisterSpellScript(aura_ascension_necromancer_event);

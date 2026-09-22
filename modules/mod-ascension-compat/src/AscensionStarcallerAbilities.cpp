@@ -17,7 +17,6 @@ using namespace AscensionStarcaller;
 constexpr uint32 selected[] = {800386, 680821, 503780, 561046, 801243, 707425, 504630, 504631, 680713, 802681, 572319};
 bool IsLunarEclipseActivation(Spell const* spell)
 {
-    // The constructor adds these flags for ALLOW_CAST_WHILE_CASTING even to a normal player cast.
     constexpr uint32 allowedFlags = TRIGGERED_IGNORE_CAST_IN_PROGRESS | TRIGGERED_CAST_DIRECTLY;
     return spell->GetSpellInfo()->Id == 800386 && !(uint32(spell->GetTriggeredCastFlags()) & ~allowedFlags);
 }
@@ -133,7 +132,7 @@ class starcaller_spells : public AllSpellScript
         if (!player || result != SPELL_CAST_OK || (spell->IsTriggered() && !IsLunarEclipseActivation(spell)))
             return;
         uint32 id = spell->GetSpellInfo()->Id;
-        if (id == 800386 && (Count(player, 802985) < MaxPhase(player) || player->HasAura(800386)))
+        if (id == 800386 && (Count(player, 802985) < LunarPhaseThreshold || player->HasAura(800386)))
             result = SPELL_FAILED_CASTER_AURASTATE;
         if ((id == 801125 && !player->HasAura(802681)) || (id == 802682 && !player->HasAura(572319)))
             result = SPELL_FAILED_CASTER_AURASTATE;
@@ -158,8 +157,10 @@ class starcaller_spells : public AllSpellScript
         Snapshot(player, spell);
         if (IsLunarEclipseActivation(spell))
         {
-            player->RemoveAurasDueToSpell(802985);
-            player->RemoveAurasDueToSpell(704519);
+            if (Aura* phase = player->GetAura(802985))
+                phase->ModStackAmount(-int32(LunarPhaseThreshold));
+            if (Count(player, 802985) < LunarPhaseThreshold)
+                player->RemoveAurasDueToSpell(704519);
         }
         if (Named(info, 801132) && player->HasAura(520482))
             ExtraTargets(player, spell, 1);
@@ -239,7 +240,6 @@ class starcaller_spells : public AllSpellScript
         uint32 id = info->Id;
         bool old = State(player).event;
         State(player).event = true;
-        // This callback runs after damage; killing blows still restore the caster's mana.
         if (player != target && !player->IsFriendlyTo(target))
         {
             if (id == 800507 && damage && player->HasAura(503584))
@@ -437,6 +437,8 @@ class spell_ascension_starcaller_ability : public SpellScript
             PreventHitDefaultEffect(index);
         if (Named(GetSpellInfo(), 801132) && index == EFFECT_1 && !player->HasAura(560662))
             PreventHitDefaultEffect(index);
+        if (id == 801401 && index == EFFECT_1 && !player->HasAura(560896))
+            PreventHitDefaultEffect(index);
     }
     void Hit(SpellEffIndex index)
     {
@@ -461,7 +463,7 @@ class spell_ascension_starcaller_ability : public SpellScript
         OnEffectHitTarget += SpellEffectFn(spell_ascension_starcaller_ability::Hit, EFFECT_ALL, SPELL_EFFECT_ANY);
     }
 };
-} // namespace
+}
 void AddSC_AscensionStarcallerAbilities()
 {
     new starcaller_spells();
