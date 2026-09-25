@@ -53,6 +53,7 @@
 #include "World.h"
 #include "WorldPacket.h"
 #include <cmath>
+#include <optional>
 #include <G3D/g3dmath.h>
 
 /// @todo: this import is not necessary for compilation and marked as unused by the IDE
@@ -2914,8 +2915,10 @@ void Spell::DoAllEffectOnTarget(TargetInfo* target)
             // damage result for other scripts, and do not infer damage from
             // later health deltas that can include triggered heals or damage.
             uint32 const healthBeforeDamage = unitTarget->GetHealth();
-            caster->DealSpellDamage(&damageInfo, true, this, &scriptDamageResult);
-            m_scriptHealthLeechDamage = std::min(scriptDamageResult, healthBeforeDamage);
+            std::optional<uint32> damageForHealthLeech;
+            caster->DealSpellDamage(&damageInfo, true, this, &scriptDamageResult, &damageForHealthLeech);
+            m_scriptHealthLeechDamage = damageForHealthLeech.value_or(
+                std::min(scriptDamageResult, healthBeforeDamage));
 
             // do procs after damage, eg healing effects
             // no need to check if target is alive, done in procdamageandspell
@@ -3701,8 +3704,8 @@ SpellCastResult Spell::prepare(SpellCastTargets const* targets, AuraEffect const
                 exceptSpellId = m_spellInfo->Id;
             }
 
-            m_caster->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_CAST, exceptSpellId, m_spellInfo->Id == 75);
-            m_caster->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_SPELL_ATTACK, exceptSpellId, m_spellInfo->Id == 75);
+            m_caster->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_CAST, exceptSpellId, m_spellInfo->Id == 75, m_spellInfo);
+            m_caster->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_SPELL_ATTACK, exceptSpellId, m_spellInfo->Id == 75, m_spellInfo);
         }
 
         m_caster->SetCurrentCastedSpell(this);
@@ -4416,7 +4419,9 @@ void Spell::SendSpellCooldown()
     Player* _player = m_caster->ToPlayer();
 
     // mana/health/etc potions, disabled by client (until combat out as declarate)
-    if (m_CastItem && (m_CastItem->IsPotion() || m_spellInfo->IsCooldownStartedOnEvent()))
+    // A triggered spell never clears the potion (Player::UpdatePotionCooldown skips it), so it must not set it either:
+    // an item whose second on-use spell is triggered would otherwise leave every potion "not ready" out of combat.
+    if (m_CastItem && !IsIgnoringCooldowns() && (m_CastItem->IsPotion() || m_spellInfo->IsCooldownStartedOnEvent()))
     {
         // need in some way provided data for Spell::finish SendCooldownEvent
         _player->SetLastPotionId(m_CastItem->GetEntry());

@@ -1210,6 +1210,10 @@ bool AuraEffect::IsAffectedOnSpell(SpellInfo const* spell) const
     if (!spell)
         return false;
 
+    if (GetAuraType() == SPELL_AURA_MOD_DAMAGE_FROM_CASTER && GetMiscValue() &&
+        !(GetMiscValue() & spell->GetSchoolMask()))
+        return false;
+
     // Check family name and EffectClassMask
     if (!spell->IsAffected(m_spellInfo->SpellFamilyName, m_spellInfo->Effects[m_effIndex].SpellClassMask))
         return false;
@@ -4423,14 +4427,18 @@ void AuraEffect::HandleAscensionModMaxManaFromStat(AuraApplication const* aurApp
         return;
 
     int32 const sourceStat = GetMiscValueB();
-    if (GetMiscValue() != POWER_MANA || sourceStat < STAT_STRENGTH || sourceStat >= MAX_STATS)
+    if (sourceStat < STAT_STRENGTH || sourceStat >= MAX_STATS ||
+        (GetMiscValue() != POWER_MANA && GetMiscValue() != POWER_HEALTH))
     {
         LOG_ERROR("spells.aura.effect", "Spell {} effect {} has invalid mana/stat mapping {} <- {} for aura 328",
             GetId(), GetEffIndex(), GetMiscValue(), sourceStat);
         return;
     }
 
-    target->ToPlayer()->UpdateMaxPower(POWER_MANA);
+    if (GetMiscValue() == POWER_HEALTH)
+        target->ToPlayer()->UpdateMaxHealth();
+    else
+        target->ToPlayer()->UpdateMaxPower(POWER_MANA);
 }
 
 void AuraEffect::HandleModSpellDamagePercentFromStat(AuraApplication const* aurApp, uint8 mode, bool /*apply*/) const
@@ -4641,7 +4649,7 @@ void AuraEffect::HandleAuraModIncreaseHealth(AuraApplication const* aurApp, uint
     {
         if (int32(target->GetHealth()) > GetAmount())
             target->ModifyHealth(-GetAmount());
-        else
+        else if (target->IsAlive())
             target->SetHealth(1);
         target->HandleStatFlatModifier(UNIT_MOD_HEALTH, TOTAL_VALUE, float(GetAmount()), apply);
     }

@@ -28,6 +28,9 @@ void AddSC_AscensionPvpPower();
 void AddSC_AscensionRestingBuff();
 void AddSC_AscensionClosestResurrection();
 void AddSC_AscensionThreatRedirect();
+void AddSC_AscensionKeepersScrollSteadfast();
+void AddSC_AscensionProfessionSpellAffect();
+void AddSC_AscensionKeepersScrollZoneBuff();
 void AddAscensionStockCoefficientScripts();
 void AddAscensionScalingBaseScripts();
 void AddCoABugReportScripts();
@@ -201,11 +204,19 @@ void AddSC_AscensionPrimalistMagmatism();
 void AddSC_AscensionPrimalistGeomancy();
 void AddSC_AscensionRunemasterTalents();
 void AddSC_AscensionRunemasterTravel();
+void AddSC_AscensionStormbringerLightning();
 void AddSC_AscensionStormbringerTalents();
+void AddSC_AscensionStormbringerThunderOrb();
+void AddSC_AscensionStormbringerMysticThunder();
 void AddSC_AscensionStormbringerWindGate();
 void AddSC_AscensionStormbringerZephyr();
+void AddSC_AscensionStormbringerDrown();
 void AddSC_AscensionStormbringerPet();
 void AddSC_AscensionStormbringerSphere();
+void AddSC_AscensionStormbringerStormflow();
+void AddSC_AscensionStormbringerFog();
+void AddSC_AscensionStormbringerSurge();
+void AddSC_AscensionStormbringerIonicAura();
 void AddSC_AscensionBloodmageSecondary();
 void AddSC_AscensionBloodmageHemostasis();
 void AddSC_AscensionRangerSecondary();
@@ -250,6 +261,8 @@ void AddSC_AscensionPrimalistSecondary();
 void AddSC_AscensionRunemasterSecondary();
 void AddSC_AscensionRunemasterHurricane();
 void AddSC_AscensionRunemasterRiftClones();
+void AddSC_AscensionWelcomeWarchest();
+void AddSC_AscensionClassBundleStore();
 
 void AddCoAScripts()
 {
@@ -432,11 +445,19 @@ void AddCoAScripts()
     AddSC_AscensionPrimalistGeomancy();
     AddSC_AscensionRunemasterTalents();
     AddSC_AscensionRunemasterTravel();
+    AddSC_AscensionStormbringerLightning();
     AddSC_AscensionStormbringerTalents();
+    AddSC_AscensionStormbringerThunderOrb();
+    AddSC_AscensionStormbringerMysticThunder();
     AddSC_AscensionStormbringerWindGate();
     AddSC_AscensionStormbringerZephyr();
+    AddSC_AscensionStormbringerDrown();
     AddSC_AscensionStormbringerPet();
     AddSC_AscensionStormbringerSphere();
+    AddSC_AscensionStormbringerStormflow();
+    AddSC_AscensionStormbringerFog();
+    AddSC_AscensionStormbringerSurge();
+    AddSC_AscensionStormbringerIonicAura();
     AddSC_AscensionBloodmageSecondary();
     AddSC_AscensionBloodmageHemostasis();
     AddSC_AscensionRangerSecondary();
@@ -499,4 +520,9 @@ void AddCoAScripts()
     AddSC_AscensionRestingBuff();
     AddSC_AscensionClosestResurrection();
     AddSC_AscensionThreatRedirect();
+    AddSC_AscensionKeepersScrollSteadfast();
+    AddSC_AscensionProfessionSpellAffect();
+    AddSC_AscensionKeepersScrollZoneBuff();
+    AddSC_AscensionWelcomeWarchest();
+    AddSC_AscensionClassBundleStore();
 }

@@ -166,6 +166,8 @@ class xoroth_casts : public AllSpellScript
         uint32 fire = State(player).fire, id = aura->GetId();
         if (id == 801064)
             duration = 3000 * fire;
+        if (id == 801063)
+            duration = 3000 * fire;
         if (id == 801017)
             duration *= 1 + fire;
         if (id == 803889)
@@ -174,6 +176,8 @@ class xoroth_casts : public AllSpellScript
             duration = int32(duration * (1 + Amount(704964, 1) / 100.0f));
         if (id == 801052)
             duration = int32(duration * State(player).unleash);
+        if (player->HasAura(704980) && Mark(aura->GetSpellInfo()))
+            duration = int32(duration * (1 + Amount(704980, 1) / 100.0f));
     }
     void OnSpellBeforeEffects(Spell* spell, Unit* caster, SpellInfo const* info) override
     {
@@ -212,10 +216,13 @@ class xoroth_casts : public AllSpellScript
     }
     void OnSpellCritChance(Spell* spell, Unit*, float& chance) override
     {
-        if (!Owner(spell->GetCaster()))
+        Player* player = Owner(spell->GetCaster());
+        if (!player)
             return;
         if (spell->GetScriptValue(524913) || spell->GetScriptValue(802618))
             chance = 100;
+        if (Spender(spell->GetSpellInfo()) && player->HasAura(705000))
+            chance = std::min(100.0f, chance + Amount(705000));
     }
     void OnSpellCalculatedTarget(Spell* spell, Unit* target, TargetInfo& result) override
     {
@@ -438,6 +445,8 @@ class xoroth_casts : public AllSpellScript
             {
                 if (player->HasAura(SPELL_WARPATH))
                     Cast(player, player, SPELL_WARPATH_PROTECTION);
+                if (player->HasAura(680216))
+                    player->RemoveMovementImpairingAuras(true);
                 Unleash(player, player);
                 if (player->HasAura(704961))
                     if (Pet* pet = player->GetPet(); pet && pet->GetEntry() == 510100)
@@ -453,8 +462,8 @@ class xoroth_casts : public AllSpellScript
                     Cast(player, pet, id == 801053 ? 802605 : id == 802344 ? 802603 : id == 804786 ? 806962 : 802604);
                     State(player).timers.ScheduleEvent(300398, 10s);
                 }
-            if (Infernal(info) && player->HasAura(707666))
-                Summon(player, 50301, player->GetNearPosition(2, 0),
+            if (Infernal(info) && player->HasAura(706755))
+                Summon(player, 50301, ImpPosition(player),
                        uint32(sSpellMgr->GetSpellInfo(807699)->GetDuration()));
             if (Named(info, 801059) && fire == 6 && player->HasAura(704452))
                 Cast(player, player, 801006);
@@ -541,12 +550,16 @@ class spell_ascension_xoroth_ability : public SpellScript
         if (summoned)
             return;
         summoned = true;
-        Position position = GetExplTargetDest() ? GetExplTargetDest()->GetPosition() : player->GetNearPosition(2, 0);
         uint32 entry = id == 704247 ? 50375 : id == 706756 ? 51323 : id == 804774 ? 50268 : 50301;
+        WorldLocation const* destination = GetExplTargetDest();
         uint32 count = id == 524897 ? 1 + uint32(GetSpell()->GetScriptValue(500906)) : std::max(1, GetEffectValue());
         uint32 duration = std::max(1000, GetSpellInfo()->GetDuration());
         for (uint32 n = 0; n < std::min(12u, count); ++n)
-            Summon(player, entry, position, duration);
+            Summon(player, entry,
+                   destination        ? destination->GetPosition()
+                   : entry == 50301   ? ImpPosition(player)
+                                      : player->GetNearPosition(2, 0),
+                   duration);
     }
     void Register() override
     {

@@ -41,6 +41,7 @@
 // whose version *is* the creature: their fight is then the authored fight, and nobody else's fight
 // changes because of it.
 #include "destiny_weaver.h"
+#include "destiny_weaver_view_damage.h"
 
 #include "Config.h"
 #include "Creature.h"
@@ -60,6 +61,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -116,7 +118,7 @@ namespace
         uint32 Armor;
         uint32 AttackPower;
         uint32 RangedAttackPower;
-        uint32 BaseDamage;
+        float BaseDamage;
     };
 
     LevelStats StatsAt(uint8 level, CreatureTemplate const* info)
@@ -124,15 +126,16 @@ namespace
         CreatureBaseStats const* stats = sObjectMgr->GetCreatureBaseStats(level, info->unit_class);
         return LevelStats{ stats->GenerateHealth(info), stats->GenerateMana(info),
                            uint32(stats->GenerateArmor(info)), stats->AttackPower, stats->RangedAttackPower,
-                           uint32(stats->GenerateBaseDamage(info)) };
+                           stats->GenerateBaseDamage(info) };
     }
 
-    /// What a creature built from this row hits for: its weapon damage plus the attack power behind
-    /// it, which is what UpdateAttackPowerAndDamage writes into UNIT_FIELD_MINDAMAGE and what
-    /// Unit::CalculateDamage reads back out.
-    double HitFrom(LevelStats const& stats)
+    /// What a creature built from this row hits for on average: the middle of its weapon range plus
+    /// the attack power behind it, which is what UpdateAttackPowerAndDamage writes into
+    /// UNIT_FIELD_MINDAMAGE and UNIT_FIELD_MAXDAMAGE and what Unit::CalculateDamage rolls between.
+    double HitFrom(LevelStats const& stats, CreatureTemplate const* info)
     {
-        return double(stats.BaseDamage) + double(stats.AttackPower) / 14.0;
+        return DestinyWeaver::AverageCreatureMeleeHit(stats.BaseDamage, stats.AttackPower, info->BaseVariance,
+                                                      info->BaseAttackTime);
     }
 
     /// One character's version of one creature.
@@ -210,10 +213,13 @@ namespace
             return false;
 
         uint8 const own = creature->GetLevel();
+        uint8 const offset = LocalLevelScaling::CreatureOffset.load(std::memory_order_relaxed);
+        Map const* map = creature->GetMap();
         // The viewer's own rule, not the realm's: a level that is told to one client is bounded by
         // nothing, because there is nobody else for a high view to be wrong for.
-        uint8 const level = LocalLevelScaling::ScaleCreatureLevelForViewer(
-            own, viewer->GetLevel(), LocalLevelScaling::CreatureOffset.load(std::memory_order_relaxed));
+        uint8 const level = map->IsNonRaidDungeon() && map->IsRegularDifficulty()
+            ? LocalLevelScaling::ScaleDungeonCreatureLevelForViewer(own, viewer->GetLevel(), offset)
+            : LocalLevelScaling::ScaleCreatureLevelForViewer(own, viewer->GetLevel(), offset);
         if (level == own)
             return false;               // their version *is* the creature: nothing to virtualise
 
@@ -229,7 +235,8 @@ namespace
         view.MaxHealth = std::max<uint32>(1, uint32(uint64(realMaxHealth) * view.Stats.Health /
                                                     std::max<uint32>(ownStats.Health, 1)));
         view.DamageDealtToPool = double(realMaxHealth) / double(view.MaxHealth);
-        view.DamageTakenFactor = HitFrom(view.Stats) / std::max(1.0, HitFrom(ownStats));
+        view.DamageTakenFactor = DestinyWeaver::ViewDamageTakenFactor(HitFrom(view.Stats, info),
+                                                                      HitFrom(ownStats, info));
         return true;
     }
 
@@ -266,6 +273,14 @@ namespace
         if (!ViewFor(creature, const_cast<Player*>(viewer), view))
             return 0;
         return view.Level;
+    }
+
+    uint32 ViewMaxHealthForCore(Player const* viewer, Creature const* creature)
+    {
+        CreatureView view;
+        if (!ViewFor(creature, const_cast<Player*>(viewer), view))
+            return 0;
+        return view.MaxHealth;
     }
 
     /// The fields a view rewrites, in one list. The patch looks a position up by index, and a forced
@@ -640,7 +655,8 @@ public:
     /// which is exactly why it works: the pool that character is watching is `1 / DamageDealtToPool`
     /// times the real one, so taking that fraction out of the real pool drops their bar by the number
     /// they were shown, and the fight lasts what a fight at their version's level lasts.
-    uint32 DealDamage(Unit* attacker, Unit* victim, uint32 damage, DamageEffectType /*damagetype*/) override
+    uint32 DealDamage(Unit* attacker, Unit* victim, uint32 damage, DamageEffectType /*damagetype*/,
+                      std::optional<uint32>* scriptHealthLeechDamage) override
     {
         Creature* creature = victim ? victim->ToCreature() : nullptr;
         Player* player = OwningPlayer(attacker);
@@ -653,6 +669,13 @@ public:
 
         if (!creature->IsAlive() || creature->IsEvadingAttacks())
             return damage;
+
+        if (scriptHealthLeechDamage)
+        {
+            uint32 const realMaxHealth = std::max<uint32>(creature->GetMaxHealth(), 1);
+            uint32 const viewHealth = uint32(uint64(creature->GetHealth()) * view.MaxHealth / realMaxHealth);
+            *scriptHealthLeechDamage = std::min(damage, viewHealth);
+        }
 
         auto* remainder = creature->CustomData.GetDefault<DamageRemainder>(DAMAGE_REMAINDER_KEY);
         double const total = double(damage) * view.DamageDealtToPool + remainder->Value;
@@ -847,6 +870,8 @@ public:
                                                         std::memory_order_relaxed);
         LocalLevelScaling::CreatureViewLevelOwner.store(available ? &ViewLevelForCore : nullptr,
                                                         std::memory_order_relaxed);
+        LocalLevelScaling::CreatureViewMaxHealthOwner.store(available ? &ViewMaxHealthForCore : nullptr,
+                                                            std::memory_order_relaxed);
 
         // Creature scaling is this module's now - per character, in the viewer's own client - so the
         // realm-wide path in CoA stands aside: it lifts the creature object itself,
@@ -890,6 +915,7 @@ public:
         LocalLevelScaling::QuestScalingOwner.store(nullptr);
         LocalLevelScaling::CreatureViewArmorOwner.store(nullptr);
         LocalLevelScaling::CreatureViewLevelOwner.store(nullptr);
+        LocalLevelScaling::CreatureViewMaxHealthOwner.store(nullptr);
     }
 };
 
