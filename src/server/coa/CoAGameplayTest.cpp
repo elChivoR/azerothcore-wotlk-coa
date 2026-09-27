@@ -1414,6 +1414,8 @@ private:
             return unit->GetDisplayId();
         if (metric == "unit_scale")
             return double(unit->GetObjectScale());
+        if (metric == "combat_reach")
+            return double(unit->GetCombatReach());
         if (metric == "power" || metric == "max_power" || metric == "pet_power" || metric == "pet_max_power")
         {
             if (metric == "pet_power" || metric == "pet_max_power")
@@ -2691,6 +2693,18 @@ private:
             creature->SetHealth(health);
             return;
         }
+        if (action == "cast" && !_actors.count(id))
+        {
+            Unit* creature = GetUnit(id);
+            uint32 spell = step.get<uint32>("spell");
+            Require(sSpellMgr->GetSpellInfo(spell) != nullptr, "Unknown spell: " + std::to_string(spell));
+            Unit* target = step.get_optional<std::string>("target")
+                ? GetUnit(step.get<std::string>("target")) : creature;
+            SpellCastResult result = creature->CastSpell(target, spell, TRIGGERED_FULL_MASK);
+            record.put("cast_result", uint32(result));
+            Require(result == SPELL_CAST_OK, "Creature cast failed: " + std::to_string(result));
+            return;
+        }
         Player* player = GetPlayer(id);
         if (auto const found = _actors.find(id); found != _actors.end())
             found->second.lastBuyOrdinal = found->second.packetOrdinal;
@@ -3113,7 +3127,14 @@ private:
             Unit* caster = action == "cast_charm" ? player->GetCharm() : player;
             Require(caster != nullptr, "Player has no charmed unit");
             Unit* target = step.get_optional<std::string>("target") ? GetUnit(step.get<std::string>("target")) : caster;
-            targets.SetUnitTarget(target);
+            if (auto targetItem = step.get_optional<uint32>("target_item"))
+            {
+                Item* item = player->GetItemByEntry(*targetItem);
+                Require(item != nullptr, "Target item is missing");
+                targets.SetItemTarget(item);
+            }
+            else
+                targets.SetUnitTarget(target);
             if (auto destination = step.get_child_optional("destination"))
                 targets.SetDst(destination->get<float>("x"), destination->get<float>("y"),
                     destination->get<float>("z"), caster->GetOrientation());
@@ -3188,7 +3209,7 @@ private:
             Item* item = player->GetItemByEntry(step.get<uint32>("item"));
             Require(item != nullptr, "Item must be granted before equipping");
             uint32 slot = step.get<uint32>("slot");
-            Require(slot < EQUIPMENT_SLOT_END, "Invalid equipment slot");
+            Require(slot < INVENTORY_SLOT_BAG_END, "Invalid equipment slot");
             WorldPacket packet(CMSG_AUTOEQUIP_ITEM_SLOT, 9);
             packet << item->GetGUID() << uint8(slot);
             WorldPackets::Item::AutoEquipItemSlot request(std::move(packet));
